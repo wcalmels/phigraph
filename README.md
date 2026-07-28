@@ -1,7 +1,7 @@
 # TUCH PhiGraph
 
 [![CI](https://github.com/wcalmels/phigraph/actions/workflows/ci.yml/badge.svg)](https://github.com/wcalmels/phigraph/actions/workflows/ci.yml)
-[![Security](https://github.com/wcalmels/phigraph/actions/workflows/codeql.yml/badge.svg)](https://github.com/wcalmels/phigraph/actions/workflows/codeql.yml)
+[![Security](https://github.com/wcalmels/phigraph/actions/workflows/security.yml/badge.svg)](https://github.com/wcalmels/phigraph/actions/workflows/security.yml)
 [![Python](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/)
 [![Release](https://img.shields.io/badge/release-4.0.0-2ea44f.svg)](RELEASE_NOTES_V4.0.0.md)
 

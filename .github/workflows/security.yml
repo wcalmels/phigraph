@@ -1,0 +1,39 @@
+name: Security
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+  schedule:
+    - cron: "15 4 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    name: Bandit and dependency audit
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install project and security tools
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[api,benchmark,auth,app,security]"
+
+      - name: Check for new static-analysis findings
+        run: bandit -q -r src -b .bandit-baseline.json
+
+      - name: Audit installed dependencies
+        run: pip-audit --local --skip-editable
