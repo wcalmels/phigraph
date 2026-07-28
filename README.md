@@ -126,6 +126,10 @@ It is designed to make unsupported claims, missing evidence and unauthorized act
 - [Security policy](SECURITY.md)
 - [Licensing strategy](docs/governance/LICENSING_STRATEGY.md)
 
+## Investor Overview
+
+[Read the TUCH PhiGraph Core 4.0.0 Investor Overview](docs/papers/TUCH_PHIGRAPH_CORE_V4_INVESTOR_OVERVIEW.md)
+
 ## Repository policy
 
 The initial GitHub repository should remain **private** until the publication checklist, secret audit and licensing decision have been completed. See [`docs/governance/PUBLICATION_CHECKLIST.md`](docs/governance/PUBLICATION_CHECKLIST.md).
