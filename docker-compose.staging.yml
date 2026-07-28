@@ -1,0 +1,38 @@
+services:
+  api:
+    build: .
+    environment:
+      PHIGRAPH_ENV: staging
+      PHIGRAPH_SHADOW_ONLY: "true"
+      PHIGRAPH_REAL_CONNECTORS_ENABLED: "false"
+      PHIGRAPH_DATABASE_URL: sqlite:////app/data/phigraph.db
+      PHIGRAPH_DATA_DIR: /app/data
+    ports:
+      - "8000:8000"
+    volumes:
+      - phigraph-staging-data:/app/data
+    read_only: true
+    tmpfs:
+      - /tmp
+    security_opt:
+      - no-new-privileges:true
+
+  worker:
+    build: .
+    command: ["phigraph-worker"]
+    environment:
+      PHIGRAPH_ENV: staging
+      PHIGRAPH_SHADOW_ONLY: "true"
+      PHIGRAPH_REAL_CONNECTORS_ENABLED: "false"
+      PHIGRAPH_DATABASE_URL: sqlite:////app/data/phigraph.db
+      PHIGRAPH_DATA_DIR: /app/data
+    volumes:
+      - phigraph-staging-data:/app/data
+    read_only: true
+    tmpfs:
+      - /tmp
+    security_opt:
+      - no-new-privileges:true
+
+volumes:
+  phigraph-staging-data:

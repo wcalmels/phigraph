@@ -1,0 +1,42 @@
+SOURCE_SCHEMAS = {
+    "auth": [
+        "time",
+        "source_user",
+        "destination_user",
+        "source_computer",
+        "destination_computer",
+        "authentication_type",
+        "logon_type",
+        "authentication_orientation",
+        "result",
+    ],
+    "proc": [
+        "time",
+        "user",
+        "computer",
+        "process_name",
+        "start_end",
+    ],
+    "flows": [
+        "time",
+        "duration",
+        "source_computer",
+        "source_port",
+        "destination_computer",
+        "destination_port",
+        "protocol",
+        "packet_count",
+        "byte_count",
+    ],
+    "dns": [
+        "time",
+        "source_computer",
+        "resolved_computer",
+    ],
+    "redteam": [
+        "time",
+        "user",
+        "source_computer",
+        "destination_computer",
+    ],
+}

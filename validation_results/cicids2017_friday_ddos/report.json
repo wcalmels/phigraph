@@ -1,0 +1,101 @@
+{
+  "dataset": {
+    "name": "CIC-IDS2017",
+    "file": "cicids2017_friday_ddos.csv",
+    "total_rows": 225745,
+    "benign_rows": 97718,
+    "attack_rows": 128027,
+    "labels": {
+      "DDoS": 128027,
+      "BENIGN": 97718
+    }
+  },
+  "protocol": {
+    "training": "benign-only, label used solely for benchmark split",
+    "test": "balanced benign/DDoS holdout",
+    "split_seed": 47,
+    "train_benign": 12000,
+    "test_benign": 6000,
+    "test_attack": 6000,
+    "selected_features": [
+      "Idle Max",
+      "Idle Mean",
+      "Idle Min",
+      "Bwd IAT Std",
+      "Fwd IAT Std",
+      "Active Max",
+      "Active Mean",
+      "Active Min",
+      "Fwd Packet Length Std",
+      "Bwd Packet Length Std",
+      "ACK Flag Count",
+      "URG Flag Count",
+      "Fwd IAT Total",
+      "Fwd IAT Max",
+      "Bwd IAT Total",
+      "Bwd IAT Max",
+      "Fwd IAT Mean",
+      "Bwd IAT Mean",
+      "Fwd Packets/s",
+      "Flow Packets/s",
+      "Init_Win_bytes_backward",
+      "Packet Length Variance",
+      "Destination Port",
+      "Flow IAT Std"
+    ],
+    "top_fraction": 0.1
+  },
+  "results": {
+    "robust_z": {
+      "roc_auc": 0.5771274999999999,
+      "pr_auc": 0.5540160219672817,
+      "precision_at_top_fraction": 0.4116666666666667,
+      "recall_at_top_fraction": 0.08233333333333333,
+      "f1_at_top_fraction": 0.13722222222222222,
+      "top_fraction": 0.1,
+      "flagged": 1200,
+      "threshold": 3.054747944482258,
+      "runtime_seconds": 0.005811086999983672
+    },
+    "isolation_forest": {
+      "roc_auc": 0.7403116249999999,
+      "pr_auc": 0.6840440685202502,
+      "precision_at_top_fraction": 0.7816666666666666,
+      "recall_at_top_fraction": 0.15633333333333332,
+      "f1_at_top_fraction": 0.26055555555555554,
+      "top_fraction": 0.1,
+      "flagged": 1200,
+      "threshold": 0.619737483013659,
+      "runtime_seconds": 0.3213293190000286
+    },
+    "local_outlier_factor": {
+      "roc_auc": 0.9757358055555556,
+      "pr_auc": 0.9506164045792432,
+      "precision_at_top_fraction": 0.9616666666666667,
+      "recall_at_top_fraction": 0.19233333333333333,
+      "f1_at_top_fraction": 0.32055555555555554,
+      "top_fraction": 0.1,
+      "flagged": 1200,
+      "threshold": 8.93210863430486,
+      "runtime_seconds": 0.3223250799999846
+    },
+    "phigraph_relational": {
+      "roc_auc": 0.7294709166666667,
+      "pr_auc": 0.7315520180137022,
+      "precision_at_top_fraction": 0.84,
+      "recall_at_top_fraction": 0.168,
+      "f1_at_top_fraction": 0.28,
+      "top_fraction": 0.1,
+      "flagged": 1200,
+      "threshold": 0.7860116666666668,
+      "runtime_seconds": 0.16541305200001943
+    }
+  },
+  "limitations": [
+    "MachineLearningCSV omits source IP, destination IP, timestamp and identity fields.",
+    "This validates flow-level anomaly ranking and similarity-graph scoring, not identity-device-process attack paths.",
+    "The split is a controlled benchmark, not a prospective deployment.",
+    "CIC-IDS2017 has documented flow construction and labeling issues; results must not be treated as production evidence."
+  ],
+  "elapsed_seconds": 3.2372230149999837
+}

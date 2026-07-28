@@ -1,0 +1,119 @@
+[
+  {
+    "entity": "C17693",
+    "entity_type": "computer",
+    "score": 1.0,
+    "severity": "critical",
+    "evidence": [
+      "bridge_entity",
+      "high_degree_centrality",
+      "official_redteam_edge",
+      "process_execution",
+      "remote_authentication_path"
+    ],
+    "redteam_related": true
+  },
+  {
+    "entity": "U748@DOM1",
+    "entity_type": "user",
+    "score": 0.381869,
+    "severity": "low",
+    "evidence": [
+      "high_degree_centrality",
+      "official_redteam_edge"
+    ],
+    "redteam_related": true
+  },
+  {
+    "entity": "U6115@DOM1",
+    "entity_type": "user",
+    "score": 0.325053,
+    "severity": "low",
+    "evidence": [
+      "high_degree_centrality",
+      "official_redteam_edge"
+    ],
+    "redteam_related": true
+  },
+  {
+    "entity": "U636@DOM1",
+    "entity_type": "user",
+    "score": 0.325053,
+    "severity": "low",
+    "evidence": [
+      "high_degree_centrality",
+      "official_redteam_edge"
+    ],
+    "redteam_related": true
+  },
+  {
+    "entity": "C728",
+    "entity_type": "computer",
+    "score": 0.267868,
+    "severity": "low",
+    "evidence": [
+      "bridge_entity",
+      "high_degree_centrality",
+      "official_redteam_edge",
+      "process_execution",
+      "remote_authentication_path"
+    ],
+    "redteam_related": true
+  },
+  {
+    "entity": "C1173",
+    "entity_type": "computer",
+    "score": 0.159677,
+    "severity": "low",
+    "evidence": [
+      "high_degree_centrality",
+      "official_redteam_edge",
+      "remote_authentication_path"
+    ],
+    "redteam_related": true
+  },
+  {
+    "entity": "C294",
+    "entity_type": "computer",
+    "score": 0.159677,
+    "severity": "low",
+    "evidence": [
+      "high_degree_centrality",
+      "official_redteam_edge",
+      "remote_authentication_path"
+    ],
+    "redteam_related": true
+  },
+  {
+    "entity": "P16",
+    "entity_type": "process",
+    "score": 0.042987,
+    "severity": "low",
+    "evidence": [],
+    "redteam_related": false
+  },
+  {
+    "entity": "P44",
+    "entity_type": "process",
+    "score": 0.042987,
+    "severity": "low",
+    "evidence": [],
+    "redteam_related": false
+  },
+  {
+    "entity": "P77",
+    "entity_type": "process",
+    "score": 0.042987,
+    "severity": "low",
+    "evidence": [],
+    "redteam_related": false
+  },
+  {
+    "entity": "P99",
+    "entity_type": "process",
+    "score": 0.042987,
+    "severity": "low",
+    "evidence": [],
+    "redteam_related": false
+  }
+]

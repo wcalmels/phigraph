@@ -1,0 +1,13 @@
+TUCH PhiGraph Core 4.0.0 — GitHub-ready source manifest
+
+Required release checks:
+- 117 automated tests pass
+- source compilation passes
+- publication audit passes
+- wheel and source distribution build successfully
+- wheel installs in a clean virtual environment
+- Docker image builds
+- Core version 4.0.0 and Protocol version 2.0.0 are reported consistently
+- default runtime remains shadow-first
+
+Repository visibility: private until licensing and publication checklist approval.

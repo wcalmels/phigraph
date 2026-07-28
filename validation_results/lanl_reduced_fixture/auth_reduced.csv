@@ -1,0 +1,5 @@
+time,source_user,destination_user,source_computer,destination_computer,authentication_type,logon_type,authentication_orientation,result,source_line_number
+151647,U748@DOM1,U748@DOM1,C17693,C728,Kerberos,Network,LogOn,Success,1
+151648,U748@DOM1,U748@DOM1,C17693,C728,Kerberos,Network,LogOn,Success,2
+151993,U6115@DOM1,U6115@DOM1,C17693,C1173,NTLM,Network,LogOn,Success,3
+153792,U636@DOM1,U636@DOM1,C17693,C294,NTLM,RemoteInteractive,LogOn,Success,4

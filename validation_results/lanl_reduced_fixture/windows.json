@@ -1,0 +1,28 @@
+[
+  {
+    "window_id": "attack-window-0001",
+    "start": 149848,
+    "end": 155592,
+    "duration_seconds": 5745,
+    "redteam_events": [
+      {
+        "time": 151648,
+        "user": "U748@DOM1",
+        "source_computer": "C17693",
+        "destination_computer": "C728"
+      },
+      {
+        "time": 151993,
+        "user": "U6115@DOM1",
+        "source_computer": "C17693",
+        "destination_computer": "C1173"
+      },
+      {
+        "time": 153792,
+        "user": "U636@DOM1",
+        "source_computer": "C17693",
+        "destination_computer": "C294"
+      }
+    ]
+  }
+]

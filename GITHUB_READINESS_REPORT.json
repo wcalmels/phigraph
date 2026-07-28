@@ -1,0 +1,12 @@
+{
+  "release": "4.0.0",
+  "protocol": "2.0.0",
+  "tests": "117 passed",
+  "publication_audit": "passed",
+  "compileall": "passed",
+  "file_count": 458,
+  "repository_visibility_recommendation": "private until licensing approval",
+  "license_current": "MIT (private baseline)",
+  "license_public_recommendation": "AGPL-3.0 plus commercial dual license, subject to legal review",
+  "generated_at": "2026-07-27"
+}

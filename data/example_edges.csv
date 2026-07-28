@@ -1,0 +1,5 @@
+source,target,weight
+truck-01,truck-02,1.0
+truck-02,truck-03,1.0
+truck-03,truck-04,1.0
+truck-04,truck-01,1.0

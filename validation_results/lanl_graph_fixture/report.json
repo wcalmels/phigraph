@@ -1,0 +1,1557 @@
+{
+  "summary": {
+    "nodes": 11,
+    "edges": 23,
+    "node_types": {
+      "user": 3,
+      "computer": 4,
+      "process": 4
+    },
+    "edge_types": {
+      "uses": 8,
+      "authenticates_as": 4,
+      "authenticates_to": 4,
+      "resolves": 3,
+      "executes": 4
+    },
+    "time_min": 151640,
+    "time_max": 153793
+  },
+  "top_anomalies": [
+    {
+      "entity": "C17693",
+      "entity_type": "computer",
+      "score": 1.0,
+      "severity": "critical",
+      "evidence": [
+        "bridge_entity",
+        "high_degree_centrality",
+        "official_redteam_edge",
+        "process_execution",
+        "remote_authentication_path"
+      ],
+      "redteam_related": true
+    },
+    {
+      "entity": "U748@DOM1",
+      "entity_type": "user",
+      "score": 0.381869,
+      "severity": "low",
+      "evidence": [
+        "high_degree_centrality",
+        "official_redteam_edge"
+      ],
+      "redteam_related": true
+    },
+    {
+      "entity": "U6115@DOM1",
+      "entity_type": "user",
+      "score": 0.325053,
+      "severity": "low",
+      "evidence": [
+        "high_degree_centrality",
+        "official_redteam_edge"
+      ],
+      "redteam_related": true
+    },
+    {
+      "entity": "U636@DOM1",
+      "entity_type": "user",
+      "score": 0.325053,
+      "severity": "low",
+      "evidence": [
+        "high_degree_centrality",
+        "official_redteam_edge"
+      ],
+      "redteam_related": true
+    },
+    {
+      "entity": "C728",
+      "entity_type": "computer",
+      "score": 0.267868,
+      "severity": "low",
+      "evidence": [
+        "bridge_entity",
+        "high_degree_centrality",
+        "official_redteam_edge",
+        "process_execution",
+        "remote_authentication_path"
+      ],
+      "redteam_related": true
+    },
+    {
+      "entity": "C1173",
+      "entity_type": "computer",
+      "score": 0.159677,
+      "severity": "low",
+      "evidence": [
+        "high_degree_centrality",
+        "official_redteam_edge",
+        "remote_authentication_path"
+      ],
+      "redteam_related": true
+    },
+    {
+      "entity": "C294",
+      "entity_type": "computer",
+      "score": 0.159677,
+      "severity": "low",
+      "evidence": [
+        "high_degree_centrality",
+        "official_redteam_edge",
+        "remote_authentication_path"
+      ],
+      "redteam_related": true
+    },
+    {
+      "entity": "P16",
+      "entity_type": "process",
+      "score": 0.042987,
+      "severity": "low",
+      "evidence": [],
+      "redteam_related": false
+    },
+    {
+      "entity": "P44",
+      "entity_type": "process",
+      "score": 0.042987,
+      "severity": "low",
+      "evidence": [],
+      "redteam_related": false
+    },
+    {
+      "entity": "P77",
+      "entity_type": "process",
+      "score": 0.042987,
+      "severity": "low",
+      "evidence": [],
+      "redteam_related": false
+    },
+    {
+      "entity": "P99",
+      "entity_type": "process",
+      "score": 0.042987,
+      "severity": "low",
+      "evidence": [],
+      "redteam_related": false
+    }
+  ],
+  "attack_paths": [
+    {
+      "anchor_time": 153792,
+      "path": [
+        "process:P77",
+        "computer:C17693",
+        "user:U6115@DOM1"
+      ],
+      "node_types": [
+        "process",
+        "computer",
+        "user"
+      ]
+    },
+    {
+      "anchor_time": 153792,
+      "path": [
+        "process:P77",
+        "computer:C17693",
+        "computer:C294"
+      ],
+      "node_types": [
+        "process",
+        "computer",
+        "computer"
+      ]
+    },
+    {
+      "anchor_time": 153792,
+      "path": [
+        "process:P77",
+        "computer:C17693",
+        "process:P44"
+      ],
+      "node_types": [
+        "process",
+        "computer",
+        "process"
+      ]
+    },
+    {
+      "anchor_time": 153792,
+      "path": [
+        "process:P77",
+        "computer:C17693"
+      ],
+      "node_types": [
+        "process",
+        "computer"
+      ]
+    },
+    {
+      "anchor_time": 153792,
+      "path": [
+        "process:P77",
+        "computer:C17693",
+        "computer:C728"
+      ],
+      "node_types": [
+        "process",
+        "computer",
+        "computer"
+      ]
+    },
+    {
+      "anchor_time": 153792,
+      "path": [
+        "process:P77",
+        "computer:C17693",
+        "computer:C1173"
+      ],
+      "node_types": [
+        "process",
+        "computer",
+        "computer"
+      ]
+    },
+    {
+      "anchor_time": 153792,
+      "path": [
+        "process:P77",
+        "computer:C17693",
+        "user:U636@DOM1"
+      ],
+      "node_types": [
+        "process",
+        "computer",
+        "user"
+      ]
+    },
+    {
+      "anchor_time": 153792,
+      "path": [
+        "process:P77",
+        "computer:C17693",
+        "process:P16"
+      ],
+      "node_types": [
+        "process",
+        "computer",
+        "process"
+      ]
+    },
+    {
+      "anchor_time": 153792,
+      "path": [
+        "process:P77",
+        "computer:C17693",
+        "user:U748@DOM1"
+      ],
+      "node_types": [
+        "process",
+        "computer",
+        "user"
+      ]
+    },
+    {
+      "anchor_time": 153792,
+      "path": [
+        "user:U6115@DOM1",
+        "computer:C17693",
+        "process:P77"
+      ],
+      "node_types": [
+        "user",
+        "computer",
+        "process"
+      ]
+    },
+    {
+      "anchor_time": 153792,
+      "path": [
+        "user:U6115@DOM1",
+        "computer:C17693",
+        "computer:C294"
+      ],
+      "node_types": [
+        "user",
+        "computer",
+        "computer"
+      ]
+    },
+    {
+      "anchor_time": 153792,
+      "path": [
+        "user:U6115@DOM1",
+        "computer:C17693",
+        "process:P44"
+      ],
+      "node_types": [
+        "user",
+        "computer",
+        "process"
+      ]
+    },
+    {
+      "anchor_time": 153792,
+      "path": [
+        "user:U6115@DOM1",
+        "computer:C17693"
+      ],
+      "node_types": [
+        "user",
+        "computer"
+      ]
+    },
+    {
+      "anchor_time": 153792,
+      "path": [
+        "user:U6115@DOM1",
+        "computer:C17693",
+        "computer:C728"
+      ],
+      "node_types": [
+        "user",
+        "computer",
+        "computer"
+      ]
+    },
+    {
+      "anchor_time": 153792,
+      "path": [
+        "user:U6115@DOM1",
+        "computer:C17693",
+        "computer:C1173"
+      ],
+      "node_types": [
+        "user",
+        "computer",
+        "computer"
+      ]
+    },
+    {
+      "anchor_time": 153792,
+      "path": [
+        "user:U6115@DOM1",
+        "computer:C17693",
+        "user:U636@DOM1"
+      ],
+      "node_types": [
+        "user",
+        "computer",
+        "user"
+      ]
+    },
+    {
+      "anchor_time": 153792,
+      "path": [
+        "user:U6115@DOM1",
+        "computer:C17693",
+        "process:P16"
+      ],
+      "node_types": [
+        "user",
+        "computer",
+        "process"
+      ]
+    },
+    {
+      "anchor_time": 153792,
+      "path": [
+        "user:U6115@DOM1",
+        "computer:C17693",
+        "user:U748@DOM1"
+      ],
+      "node_types": [
+        "user",
+        "computer",
+        "user"
+      ]
+    },
+    {
+      "anchor_time": 153792,
+      "path": [
+        "computer:C294",
+        "computer:C17693",
+        "process:P77"
+      ],
+      "node_types": [
+        "computer",
+        "computer",
+        "process"
+      ]
+    },
+    {
+      "anchor_time": 153792,
+      "path": [
+        "computer:C294",
+        "computer:C17693",
+        "user:U6115@DOM1"
+      ],
+      "node_types": [
+        "computer",
+        "computer",
+        "user"
+      ]
+    },
+    {
+      "anchor_time": 153792,
+      "path": [
+        "computer:C294",
+        "computer:C17693",
+        "process:P44"
+      ],
+      "node_types": [
+        "computer",
+        "computer",
+        "process"
+      ]
+    },
+    {
+      "anchor_time": 153792,
+      "path": [
+        "computer:C294",
+        "computer:C17693"
+      ],
+      "node_types": [
+        "computer",
+        "computer"
+      ]
+    },
+    {
+      "anchor_time": 153792,
+      "path": [
+        "computer:C294",
+        "computer:C17693",
+        "computer:C728"
+      ],
+      "node_types": [
+        "computer",
+        "computer",
+        "computer"
+      ]
+    },
+    {
+      "anchor_time": 153792,
+      "path": [
+        "computer:C294",
+        "computer:C17693",
+        "computer:C1173"
+      ],
+      "node_types": [
+        "computer",
+        "computer",
+        "computer"
+      ]
+    },
+    {
+      "anchor_time": 153792,
+      "path": [
+        "computer:C294",
+        "computer:C17693",
+        "user:U636@DOM1"
+      ],
+      "node_types": [
+        "computer",
+        "computer",
+        "user"
+      ]
+    },
+    {
+      "anchor_time": 153792,
+      "path": [
+        "computer:C294",
+        "computer:C17693",
+        "process:P16"
+      ],
+      "node_types": [
+        "computer",
+        "computer",
+        "process"
+      ]
+    },
+    {
+      "anchor_time": 153792,
+      "path": [
+        "computer:C294",
+        "computer:C17693",
+        "user:U748@DOM1"
+      ],
+      "node_types": [
+        "computer",
+        "computer",
+        "user"
+      ]
+    },
+    {
+      "anchor_time": 153792,
+      "path": [
+        "process:P44",
+        "computer:C17693",
+        "process:P77"
+      ],
+      "node_types": [
+        "process",
+        "computer",
+        "process"
+      ]
+    },
+    {
+      "anchor_time": 153792,
+      "path": [
+        "process:P44",
+        "computer:C17693",
+        "user:U6115@DOM1"
+      ],
+      "node_types": [
+        "process",
+        "computer",
+        "user"
+      ]
+    },
+    {
+      "anchor_time": 153792,
+      "path": [
+        "process:P44",
+        "computer:C17693",
+        "computer:C294"
+      ],
+      "node_types": [
+        "process",
+        "computer",
+        "computer"
+      ]
+    },
+    {
+      "anchor_time": 153792,
+      "path": [
+        "process:P44",
+        "computer:C17693"
+      ],
+      "node_types": [
+        "process",
+        "computer"
+      ]
+    },
+    {
+      "anchor_time": 153792,
+      "path": [
+        "process:P44",
+        "computer:C17693",
+        "computer:C728"
+      ],
+      "node_types": [
+        "process",
+        "computer",
+        "computer"
+      ]
+    },
+    {
+      "anchor_time": 153792,
+      "path": [
+        "process:P44",
+        "computer:C17693",
+        "computer:C1173"
+      ],
+      "node_types": [
+        "process",
+        "computer",
+        "computer"
+      ]
+    },
+    {
+      "anchor_time": 153792,
+      "path": [
+        "process:P44",
+        "computer:C17693",
+        "user:U636@DOM1"
+      ],
+      "node_types": [
+        "process",
+        "computer",
+        "user"
+      ]
+    },
+    {
+      "anchor_time": 153792,
+      "path": [
+        "process:P44",
+        "computer:C17693",
+        "process:P16"
+      ],
+      "node_types": [
+        "process",
+        "computer",
+        "process"
+      ]
+    },
+    {
+      "anchor_time": 153792,
+      "path": [
+        "process:P44",
+        "computer:C17693",
+        "user:U748@DOM1"
+      ],
+      "node_types": [
+        "process",
+        "computer",
+        "user"
+      ]
+    },
+    {
+      "anchor_time": 153792,
+      "path": [
+        "computer:C17693",
+        "process:P77"
+      ],
+      "node_types": [
+        "computer",
+        "process"
+      ]
+    },
+    {
+      "anchor_time": 153792,
+      "path": [
+        "computer:C17693",
+        "user:U6115@DOM1"
+      ],
+      "node_types": [
+        "computer",
+        "user"
+      ]
+    },
+    {
+      "anchor_time": 153792,
+      "path": [
+        "computer:C17693",
+        "computer:C294"
+      ],
+      "node_types": [
+        "computer",
+        "computer"
+      ]
+    },
+    {
+      "anchor_time": 153792,
+      "path": [
+        "computer:C17693",
+        "process:P44"
+      ],
+      "node_types": [
+        "computer",
+        "process"
+      ]
+    },
+    {
+      "anchor_time": 153792,
+      "path": [
+        "computer:C17693",
+        "computer:C728"
+      ],
+      "node_types": [
+        "computer",
+        "computer"
+      ]
+    },
+    {
+      "anchor_time": 153792,
+      "path": [
+        "computer:C17693",
+        "computer:C1173"
+      ],
+      "node_types": [
+        "computer",
+        "computer"
+      ]
+    },
+    {
+      "anchor_time": 153792,
+      "path": [
+        "computer:C17693",
+        "user:U636@DOM1"
+      ],
+      "node_types": [
+        "computer",
+        "user"
+      ]
+    },
+    {
+      "anchor_time": 153792,
+      "path": [
+        "computer:C17693",
+        "process:P16"
+      ],
+      "node_types": [
+        "computer",
+        "process"
+      ]
+    },
+    {
+      "anchor_time": 153792,
+      "path": [
+        "computer:C17693",
+        "user:U748@DOM1"
+      ],
+      "node_types": [
+        "computer",
+        "user"
+      ]
+    },
+    {
+      "anchor_time": 153792,
+      "path": [
+        "computer:C728",
+        "computer:C17693",
+        "process:P77"
+      ],
+      "node_types": [
+        "computer",
+        "computer",
+        "process"
+      ]
+    },
+    {
+      "anchor_time": 153792,
+      "path": [
+        "computer:C728",
+        "computer:C17693",
+        "user:U6115@DOM1"
+      ],
+      "node_types": [
+        "computer",
+        "computer",
+        "user"
+      ]
+    },
+    {
+      "anchor_time": 153792,
+      "path": [
+        "computer:C728",
+        "computer:C17693",
+        "computer:C294"
+      ],
+      "node_types": [
+        "computer",
+        "computer",
+        "computer"
+      ]
+    },
+    {
+      "anchor_time": 153792,
+      "path": [
+        "computer:C728",
+        "computer:C17693",
+        "process:P44"
+      ],
+      "node_types": [
+        "computer",
+        "computer",
+        "process"
+      ]
+    },
+    {
+      "anchor_time": 153792,
+      "path": [
+        "computer:C728",
+        "computer:C17693"
+      ],
+      "node_types": [
+        "computer",
+        "computer"
+      ]
+    },
+    {
+      "anchor_time": 153792,
+      "path": [
+        "computer:C728",
+        "computer:C17693",
+        "computer:C1173"
+      ],
+      "node_types": [
+        "computer",
+        "computer",
+        "computer"
+      ]
+    },
+    {
+      "anchor_time": 153792,
+      "path": [
+        "computer:C728",
+        "computer:C17693",
+        "user:U636@DOM1"
+      ],
+      "node_types": [
+        "computer",
+        "computer",
+        "user"
+      ]
+    },
+    {
+      "anchor_time": 153792,
+      "path": [
+        "computer:C728",
+        "computer:C17693",
+        "process:P16"
+      ],
+      "node_types": [
+        "computer",
+        "computer",
+        "process"
+      ]
+    },
+    {
+      "anchor_time": 153792,
+      "path": [
+        "computer:C728",
+        "user:U748@DOM1"
+      ],
+      "node_types": [
+        "computer",
+        "user"
+      ]
+    },
+    {
+      "anchor_time": 153792,
+      "path": [
+        "computer:C1173",
+        "computer:C17693",
+        "process:P77"
+      ],
+      "node_types": [
+        "computer",
+        "computer",
+        "process"
+      ]
+    },
+    {
+      "anchor_time": 153792,
+      "path": [
+        "computer:C1173",
+        "computer:C17693",
+        "user:U6115@DOM1"
+      ],
+      "node_types": [
+        "computer",
+        "computer",
+        "user"
+      ]
+    },
+    {
+      "anchor_time": 153792,
+      "path": [
+        "computer:C1173",
+        "computer:C17693",
+        "computer:C294"
+      ],
+      "node_types": [
+        "computer",
+        "computer",
+        "computer"
+      ]
+    },
+    {
+      "anchor_time": 153792,
+      "path": [
+        "computer:C1173",
+        "computer:C17693",
+        "process:P44"
+      ],
+      "node_types": [
+        "computer",
+        "computer",
+        "process"
+      ]
+    },
+    {
+      "anchor_time": 153792,
+      "path": [
+        "computer:C1173",
+        "computer:C17693"
+      ],
+      "node_types": [
+        "computer",
+        "computer"
+      ]
+    },
+    {
+      "anchor_time": 153792,
+      "path": [
+        "computer:C1173",
+        "computer:C17693",
+        "computer:C728"
+      ],
+      "node_types": [
+        "computer",
+        "computer",
+        "computer"
+      ]
+    },
+    {
+      "anchor_time": 153792,
+      "path": [
+        "computer:C1173",
+        "computer:C17693",
+        "user:U636@DOM1"
+      ],
+      "node_types": [
+        "computer",
+        "computer",
+        "user"
+      ]
+    },
+    {
+      "anchor_time": 153792,
+      "path": [
+        "computer:C1173",
+        "computer:C17693",
+        "process:P16"
+      ],
+      "node_types": [
+        "computer",
+        "computer",
+        "process"
+      ]
+    },
+    {
+      "anchor_time": 153792,
+      "path": [
+        "computer:C1173",
+        "computer:C17693",
+        "user:U748@DOM1"
+      ],
+      "node_types": [
+        "computer",
+        "computer",
+        "user"
+      ]
+    },
+    {
+      "anchor_time": 153792,
+      "path": [
+        "user:U636@DOM1",
+        "computer:C17693",
+        "process:P77"
+      ],
+      "node_types": [
+        "user",
+        "computer",
+        "process"
+      ]
+    },
+    {
+      "anchor_time": 153792,
+      "path": [
+        "user:U636@DOM1",
+        "computer:C17693",
+        "user:U6115@DOM1"
+      ],
+      "node_types": [
+        "user",
+        "computer",
+        "user"
+      ]
+    },
+    {
+      "anchor_time": 153792,
+      "path": [
+        "user:U636@DOM1",
+        "computer:C17693",
+        "computer:C294"
+      ],
+      "node_types": [
+        "user",
+        "computer",
+        "computer"
+      ]
+    },
+    {
+      "anchor_time": 153792,
+      "path": [
+        "user:U636@DOM1",
+        "computer:C17693",
+        "process:P44"
+      ],
+      "node_types": [
+        "user",
+        "computer",
+        "process"
+      ]
+    },
+    {
+      "anchor_time": 153792,
+      "path": [
+        "user:U636@DOM1",
+        "computer:C17693"
+      ],
+      "node_types": [
+        "user",
+        "computer"
+      ]
+    },
+    {
+      "anchor_time": 153792,
+      "path": [
+        "user:U636@DOM1",
+        "computer:C17693",
+        "computer:C728"
+      ],
+      "node_types": [
+        "user",
+        "computer",
+        "computer"
+      ]
+    },
+    {
+      "anchor_time": 153792,
+      "path": [
+        "user:U636@DOM1",
+        "computer:C17693",
+        "computer:C1173"
+      ],
+      "node_types": [
+        "user",
+        "computer",
+        "computer"
+      ]
+    },
+    {
+      "anchor_time": 153792,
+      "path": [
+        "user:U636@DOM1",
+        "computer:C17693",
+        "process:P16"
+      ],
+      "node_types": [
+        "user",
+        "computer",
+        "process"
+      ]
+    },
+    {
+      "anchor_time": 153792,
+      "path": [
+        "user:U636@DOM1",
+        "computer:C17693",
+        "user:U748@DOM1"
+      ],
+      "node_types": [
+        "user",
+        "computer",
+        "user"
+      ]
+    },
+    {
+      "anchor_time": 153792,
+      "path": [
+        "process:P16",
+        "computer:C17693",
+        "process:P77"
+      ],
+      "node_types": [
+        "process",
+        "computer",
+        "process"
+      ]
+    },
+    {
+      "anchor_time": 153792,
+      "path": [
+        "process:P16",
+        "computer:C17693",
+        "user:U6115@DOM1"
+      ],
+      "node_types": [
+        "process",
+        "computer",
+        "user"
+      ]
+    },
+    {
+      "anchor_time": 153792,
+      "path": [
+        "process:P16",
+        "computer:C17693",
+        "computer:C294"
+      ],
+      "node_types": [
+        "process",
+        "computer",
+        "computer"
+      ]
+    },
+    {
+      "anchor_time": 153792,
+      "path": [
+        "process:P16",
+        "computer:C17693",
+        "process:P44"
+      ],
+      "node_types": [
+        "process",
+        "computer",
+        "process"
+      ]
+    },
+    {
+      "anchor_time": 153792,
+      "path": [
+        "process:P16",
+        "computer:C17693"
+      ],
+      "node_types": [
+        "process",
+        "computer"
+      ]
+    },
+    {
+      "anchor_time": 153792,
+      "path": [
+        "process:P16",
+        "computer:C17693",
+        "computer:C728"
+      ],
+      "node_types": [
+        "process",
+        "computer",
+        "computer"
+      ]
+    },
+    {
+      "anchor_time": 153792,
+      "path": [
+        "process:P16",
+        "computer:C17693",
+        "computer:C1173"
+      ],
+      "node_types": [
+        "process",
+        "computer",
+        "computer"
+      ]
+    },
+    {
+      "anchor_time": 153792,
+      "path": [
+        "process:P16",
+        "computer:C17693",
+        "user:U636@DOM1"
+      ],
+      "node_types": [
+        "process",
+        "computer",
+        "user"
+      ]
+    },
+    {
+      "anchor_time": 153792,
+      "path": [
+        "process:P16",
+        "computer:C17693",
+        "user:U748@DOM1"
+      ],
+      "node_types": [
+        "process",
+        "computer",
+        "user"
+      ]
+    },
+    {
+      "anchor_time": 153792,
+      "path": [
+        "user:U748@DOM1",
+        "computer:C17693",
+        "process:P77"
+      ],
+      "node_types": [
+        "user",
+        "computer",
+        "process"
+      ]
+    },
+    {
+      "anchor_time": 153792,
+      "path": [
+        "user:U748@DOM1",
+        "computer:C17693",
+        "user:U6115@DOM1"
+      ],
+      "node_types": [
+        "user",
+        "computer",
+        "user"
+      ]
+    },
+    {
+      "anchor_time": 153792,
+      "path": [
+        "user:U748@DOM1",
+        "computer:C17693",
+        "computer:C294"
+      ],
+      "node_types": [
+        "user",
+        "computer",
+        "computer"
+      ]
+    },
+    {
+      "anchor_time": 153792,
+      "path": [
+        "user:U748@DOM1",
+        "computer:C17693",
+        "process:P44"
+      ],
+      "node_types": [
+        "user",
+        "computer",
+        "process"
+      ]
+    },
+    {
+      "anchor_time": 153792,
+      "path": [
+        "user:U748@DOM1",
+        "computer:C17693"
+      ],
+      "node_types": [
+        "user",
+        "computer"
+      ]
+    },
+    {
+      "anchor_time": 153792,
+      "path": [
+        "user:U748@DOM1",
+        "computer:C728"
+      ],
+      "node_types": [
+        "user",
+        "computer"
+      ]
+    },
+    {
+      "anchor_time": 153792,
+      "path": [
+        "user:U748@DOM1",
+        "computer:C17693",
+        "computer:C1173"
+      ],
+      "node_types": [
+        "user",
+        "computer",
+        "computer"
+      ]
+    },
+    {
+      "anchor_time": 153792,
+      "path": [
+        "user:U748@DOM1",
+        "computer:C17693",
+        "user:U636@DOM1"
+      ],
+      "node_types": [
+        "user",
+        "computer",
+        "user"
+      ]
+    },
+    {
+      "anchor_time": 153792,
+      "path": [
+        "user:U748@DOM1",
+        "computer:C17693",
+        "process:P16"
+      ],
+      "node_types": [
+        "user",
+        "computer",
+        "process"
+      ]
+    },
+    {
+      "anchor_time": 151648,
+      "path": [
+        "process:P77",
+        "computer:C17693",
+        "computer:C728",
+        "process:P99"
+      ],
+      "node_types": [
+        "process",
+        "computer",
+        "computer",
+        "process"
+      ]
+    },
+    {
+      "anchor_time": 151648,
+      "path": [
+        "user:U6115@DOM1",
+        "computer:C17693",
+        "computer:C728",
+        "process:P99"
+      ],
+      "node_types": [
+        "user",
+        "computer",
+        "computer",
+        "process"
+      ]
+    },
+    {
+      "anchor_time": 151648,
+      "path": [
+        "computer:C294",
+        "computer:C17693",
+        "computer:C728",
+        "process:P99"
+      ],
+      "node_types": [
+        "computer",
+        "computer",
+        "computer",
+        "process"
+      ]
+    },
+    {
+      "anchor_time": 151648,
+      "path": [
+        "process:P44",
+        "computer:C17693",
+        "computer:C728",
+        "process:P99"
+      ],
+      "node_types": [
+        "process",
+        "computer",
+        "computer",
+        "process"
+      ]
+    },
+    {
+      "anchor_time": 151648,
+      "path": [
+        "computer:C728",
+        "process:P99"
+      ],
+      "node_types": [
+        "computer",
+        "process"
+      ]
+    },
+    {
+      "anchor_time": 151648,
+      "path": [
+        "computer:C17693",
+        "computer:C728",
+        "process:P99"
+      ],
+      "node_types": [
+        "computer",
+        "computer",
+        "process"
+      ]
+    },
+    {
+      "anchor_time": 151648,
+      "path": [
+        "process:P99",
+        "computer:C728",
+        "computer:C17693",
+        "process:P77"
+      ],
+      "node_types": [
+        "process",
+        "computer",
+        "computer",
+        "process"
+      ]
+    },
+    {
+      "anchor_time": 151648,
+      "path": [
+        "process:P99",
+        "computer:C728",
+        "computer:C17693",
+        "user:U6115@DOM1"
+      ],
+      "node_types": [
+        "process",
+        "computer",
+        "computer",
+        "user"
+      ]
+    },
+    {
+      "anchor_time": 151648,
+      "path": [
+        "process:P99",
+        "computer:C728",
+        "computer:C17693",
+        "computer:C294"
+      ],
+      "node_types": [
+        "process",
+        "computer",
+        "computer",
+        "computer"
+      ]
+    },
+    {
+      "anchor_time": 151648,
+      "path": [
+        "process:P99",
+        "computer:C728",
+        "computer:C17693",
+        "process:P44"
+      ],
+      "node_types": [
+        "process",
+        "computer",
+        "computer",
+        "process"
+      ]
+    },
+    {
+      "anchor_time": 151648,
+      "path": [
+        "process:P99",
+        "computer:C728"
+      ],
+      "node_types": [
+        "process",
+        "computer"
+      ]
+    },
+    {
+      "anchor_time": 151648,
+      "path": [
+        "process:P99",
+        "computer:C728",
+        "computer:C17693"
+      ],
+      "node_types": [
+        "process",
+        "computer",
+        "computer"
+      ]
+    },
+    {
+      "anchor_time": 151648,
+      "path": [
+        "process:P99",
+        "computer:C728",
+        "computer:C17693",
+        "computer:C1173"
+      ],
+      "node_types": [
+        "process",
+        "computer",
+        "computer",
+        "computer"
+      ]
+    },
+    {
+      "anchor_time": 151648,
+      "path": [
+        "process:P99",
+        "computer:C728",
+        "computer:C17693",
+        "user:U636@DOM1"
+      ],
+      "node_types": [
+        "process",
+        "computer",
+        "computer",
+        "user"
+      ]
+    },
+    {
+      "anchor_time": 151648,
+      "path": [
+        "process:P99",
+        "computer:C728",
+        "computer:C17693",
+        "process:P16"
+      ],
+      "node_types": [
+        "process",
+        "computer",
+        "computer",
+        "process"
+      ]
+    },
+    {
+      "anchor_time": 151648,
+      "path": [
+        "process:P99",
+        "computer:C728",
+        "user:U748@DOM1"
+      ],
+      "node_types": [
+        "process",
+        "computer",
+        "user"
+      ]
+    },
+    {
+      "anchor_time": 151648,
+      "path": [
+        "computer:C1173",
+        "computer:C17693",
+        "computer:C728",
+        "process:P99"
+      ],
+      "node_types": [
+        "computer",
+        "computer",
+        "computer",
+        "process"
+      ]
+    },
+    {
+      "anchor_time": 151648,
+      "path": [
+        "user:U636@DOM1",
+        "computer:C17693",
+        "computer:C728",
+        "process:P99"
+      ],
+      "node_types": [
+        "user",
+        "computer",
+        "computer",
+        "process"
+      ]
+    },
+    {
+      "anchor_time": 151648,
+      "path": [
+        "process:P16",
+        "computer:C17693",
+        "computer:C728",
+        "process:P99"
+      ],
+      "node_types": [
+        "process",
+        "computer",
+        "computer",
+        "process"
+      ]
+    },
+    {
+      "anchor_time": 151648,
+      "path": [
+        "user:U748@DOM1",
+        "computer:C728",
+        "process:P99"
+      ],
+      "node_types": [
+        "user",
+        "computer",
+        "process"
+      ]
+    }
+  ],
+  "executed": false,
+  "interpretation": "Relational graph construction and ranking only; no real action executed."
+}

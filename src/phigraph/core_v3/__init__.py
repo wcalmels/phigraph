@@ -1,0 +1,31 @@
+"""PhiGraph Core v3 canonical protocol and governed runtime."""
+from .models import (
+    Claim, ClaimStatus, Evidence, EvidenceStatus, Verification,
+    ActionProposal, PolicyDecision, DecisionEffect, Outcome, RuntimeMode,
+)
+from .ledger import EvidenceLedger
+from .policy import PolicyRule, PolicyEngine
+from .adapters import AgentAdapter, AgentProposal, StaticAgentAdapter
+from .runtime import PhiGraphCoreRuntime, RuntimeReport
+from .service import CoreV3Service
+from .integrations import LegacyBridge, LegacyIntegrationPaths
+
+__all__ = [
+    "Claim", "ClaimStatus", "Evidence", "EvidenceStatus", "Verification",
+    "ActionProposal", "PolicyDecision", "DecisionEffect", "Outcome", "RuntimeMode",
+    "EvidenceLedger", "PolicyRule", "PolicyEngine", "AgentAdapter", "AgentProposal",
+    "StaticAgentAdapter", "PhiGraphCoreRuntime", "RuntimeReport", "CoreV3Service",
+    "LegacyBridge", "LegacyIntegrationPaths", "LedgerBackend", "JsonLedgerBackend",
+    "SQLiteLedgerBackend", "PostgreSQLLedgerBackend", "IdempotencyStore",
+]
+
+from .backends import PostgreSQLLedgerBackend, LedgerBackend, JsonLedgerBackend, SQLiteLedgerBackend
+from .idempotency import IdempotencyStore
+
+from .code_benchmark import (
+    AgentReport,
+    CodeVerifier,
+    GitHubRepositoryDescriptor,
+    PhiGraphCodeBenchmark,
+    RepositoryIndexer,
+)

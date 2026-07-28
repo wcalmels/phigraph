@@ -1,0 +1,4 @@
+time,user,source_computer,destination_computer,label
+151648,U748@DOM1,C17693,C728,redteam
+151993,U6115@DOM1,C17693,C1173,redteam
+153792,U636@DOM1,C17693,C294,redteam

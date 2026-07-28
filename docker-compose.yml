@@ -1,0 +1,23 @@
+services:
+  phigraph-api:
+    build: .
+    container_name: phigraph-api
+    environment:
+      PHIGRAPH_ENV: production
+      PHIGRAPH_PORT: 8000
+      PHIGRAPH_SHADOW_ONLY: "true"
+      PHIGRAPH_REAL_CONNECTORS_ENABLED: "false"
+      PHIGRAPH_DATA_DIR: /app/data
+    ports:
+      - "8000:8000"
+    volumes:
+      - phigraph-data:/app/data
+    restart: unless-stopped
+    read_only: true
+    tmpfs:
+      - /tmp
+    security_opt:
+      - no-new-privileges:true
+
+volumes:
+  phigraph-data:

@@ -1,0 +1,75 @@
+{
+  "dataset": "LANL Comprehensive Multi-Source Cyber-Security Events",
+  "profile": "documentation-minimal",
+  "config": {
+    "pre_seconds": 1800,
+    "post_seconds": 1800,
+    "background_pre_seconds": 21600,
+    "include_sources": [
+      "auth",
+      "proc",
+      "dns"
+    ],
+    "merge_overlapping_windows": true,
+    "entity_filter": true,
+    "max_events_per_source": 100000,
+    "profile_name": "documentation-minimal"
+  },
+  "redteam_events": 3,
+  "attack_windows": 1,
+  "redteam_entities": 7,
+  "sources": [
+    {
+      "source": "auth",
+      "input_file": "auth.txt",
+      "output_file": "auth_reduced.csv",
+      "scanned_rows": 5,
+      "written_rows": 4,
+      "malformed_rows": 0,
+      "truncated": false
+    },
+    {
+      "source": "proc",
+      "input_file": "proc.txt",
+      "output_file": "proc_reduced.csv",
+      "scanned_rows": 5,
+      "written_rows": 4,
+      "malformed_rows": 0,
+      "truncated": false
+    },
+    {
+      "source": "dns",
+      "input_file": "dns.txt",
+      "output_file": "dns_reduced.csv",
+      "scanned_rows": 4,
+      "written_rows": 3,
+      "malformed_rows": 0,
+      "truncated": false
+    }
+  ],
+  "checksums": {
+    "redteam": {
+      "file": "redteam.txt",
+      "sha256": "d08119fe062d84703ac375dc2df2c308b2172322fa31c512151d9b839e71224b"
+    },
+    "auth": {
+      "file": "auth.txt",
+      "sha256": "73d60f45fa2ffdbe223258d0c1fe1d69043288b46ec8235195afcfc60572598a"
+    },
+    "proc": {
+      "file": "proc.txt",
+      "sha256": "55144cddeaa9ad1e1be1eb5fff92606b0b7f7157b670fdbb3f5191690e94c7ad"
+    },
+    "dns": {
+      "file": "dns.txt",
+      "sha256": "253c924e7f625f884b0796fa1c1622a7b3612a6a53dfbc84d1708f5815b0e98e"
+    }
+  },
+  "provenance": {
+    "timestamp_resolution": "1 second",
+    "epoch": "de-identified offset beginning at 1",
+    "selection": "windows centered on official redteam events",
+    "entity_filter": true,
+    "lineage_column": "source_line_number"
+  }
+}

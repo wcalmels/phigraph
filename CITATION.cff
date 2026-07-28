@@ -1,0 +1,17 @@
+cf-version: 1.2.0
+title: "TUCH PhiGraph Core"
+message: "If you use PhiGraph in research, cite this software release."
+type: software
+authors:
+  - family-names: "Calmels"
+    given-names: "Walter"
+version: 4.0.0
+date-released: 2026-07-27
+repository-code: "https://github.com/wcalmels/phigraph"
+license: MIT
+keywords:
+  - governed AI
+  - evidence ledger
+  - graph intelligence
+  - agent verification
+  - shadow-first

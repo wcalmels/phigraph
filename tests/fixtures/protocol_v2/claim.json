@@ -1,0 +1,13 @@
+{
+  "claim_id": "cl_fixture",
+  "statement": "All tests pass",
+  "claim_type": "test_run",
+  "subject": "repository@commit",
+  "issuer": "agent",
+  "status": "verified",
+  "confidence": 1.0,
+  "evidence_ids": ["ev_fixture"],
+  "created_at": "2026-07-27T00:00:00+00:00",
+  "supersedes": null,
+  "metadata": {"tenant_id": "default", "project_id": "default"}
+}

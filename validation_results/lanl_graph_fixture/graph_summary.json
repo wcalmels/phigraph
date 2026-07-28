@@ -1,0 +1,18 @@
+{
+  "nodes": 11,
+  "edges": 23,
+  "node_types": {
+    "user": 3,
+    "computer": 4,
+    "process": 4
+  },
+  "edge_types": {
+    "uses": 8,
+    "authenticates_as": 4,
+    "authenticates_to": 4,
+    "resolves": 3,
+    "executes": 4
+  },
+  "time_min": 151640,
+  "time_max": 153793
+}

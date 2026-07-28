@@ -1,0 +1,200 @@
+<?xml version='1.0' encoding='utf-8'?>
+<graphml xmlns="http://graphml.graphdrawing.org/xmlns" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://graphml.graphdrawing.org/xmlns http://graphml.graphdrawing.org/xmlns/1.0/graphml.xsd"><key id="d9" for="edge" attr.name="lifecycle" attr.type="string"/>
+<key id="d8" for="edge" attr.name="logon_type" attr.type="string"/>
+<key id="d7" for="edge" attr.name="authentication_type" attr.type="string"/>
+<key id="d6" for="edge" attr.name="result" attr.type="string"/>
+<key id="d5" for="edge" attr.name="redteam" attr.type="boolean"/>
+<key id="d4" for="edge" attr.name="source" attr.type="string"/>
+<key id="d3" for="edge" attr.name="time" attr.type="long"/>
+<key id="d2" for="edge" attr.name="edge_type" attr.type="string"/>
+<key id="d1" for="node" attr.name="node_type" attr.type="string"/>
+<key id="d0" for="graph" attr.name="dataset" attr.type="string"/>
+<graph edgedefault="directed"><data key="d0">LANL cyber1 reduced</data>
+<node id="user:U748@DOM1">
+  <data key="d1">user</data>
+</node>
+<node id="computer:C17693">
+  <data key="d1">computer</data>
+</node>
+<node id="computer:C728">
+  <data key="d1">computer</data>
+</node>
+<node id="user:U6115@DOM1">
+  <data key="d1">user</data>
+</node>
+<node id="computer:C1173">
+  <data key="d1">computer</data>
+</node>
+<node id="user:U636@DOM1">
+  <data key="d1">user</data>
+</node>
+<node id="computer:C294">
+  <data key="d1">computer</data>
+</node>
+<node id="process:P16">
+  <data key="d1">process</data>
+</node>
+<node id="process:P99">
+  <data key="d1">process</data>
+</node>
+<node id="process:P44">
+  <data key="d1">process</data>
+</node>
+<node id="process:P77">
+  <data key="d1">process</data>
+</node>
+<edge source="user:U748@DOM1" target="computer:C17693" id="0">
+  <data key="d2">uses</data>
+  <data key="d3">151647</data>
+  <data key="d4">auth</data>
+  <data key="d5">False</data>
+  <data key="d6">Success</data>
+</edge>
+<edge source="user:U748@DOM1" target="computer:C17693" id="1">
+  <data key="d2">uses</data>
+  <data key="d3">151648</data>
+  <data key="d4">auth</data>
+  <data key="d5">True</data>
+  <data key="d6">Success</data>
+</edge>
+<edge source="user:U748@DOM1" target="computer:C17693" id="2">
+  <data key="d2">uses</data>
+  <data key="d3">151640</data>
+  <data key="d4">proc</data>
+  <data key="d5">False</data>
+</edge>
+<edge source="user:U748@DOM1" target="user:U748@DOM1" id="0">
+  <data key="d2">authenticates_as</data>
+  <data key="d3">151647</data>
+  <data key="d4">auth</data>
+  <data key="d5">False</data>
+</edge>
+<edge source="user:U748@DOM1" target="user:U748@DOM1" id="1">
+  <data key="d2">authenticates_as</data>
+  <data key="d3">151648</data>
+  <data key="d4">auth</data>
+  <data key="d5">True</data>
+</edge>
+<edge source="user:U748@DOM1" target="computer:C728" id="0">
+  <data key="d2">uses</data>
+  <data key="d3">151650</data>
+  <data key="d4">proc</data>
+  <data key="d5">False</data>
+</edge>
+<edge source="computer:C17693" target="computer:C728" id="0">
+  <data key="d2">authenticates_to</data>
+  <data key="d3">151647</data>
+  <data key="d4">auth</data>
+  <data key="d5">False</data>
+  <data key="d7">Kerberos</data>
+  <data key="d8">Network</data>
+</edge>
+<edge source="computer:C17693" target="computer:C728" id="1">
+  <data key="d2">authenticates_to</data>
+  <data key="d3">151648</data>
+  <data key="d4">auth</data>
+  <data key="d5">True</data>
+  <data key="d7">Kerberos</data>
+  <data key="d8">Network</data>
+</edge>
+<edge source="computer:C17693" target="computer:C728" id="2">
+  <data key="d2">resolves</data>
+  <data key="d3">151649</data>
+  <data key="d4">dns</data>
+  <data key="d5">False</data>
+</edge>
+<edge source="computer:C17693" target="computer:C1173" id="0">
+  <data key="d2">authenticates_to</data>
+  <data key="d3">151993</data>
+  <data key="d4">auth</data>
+  <data key="d5">True</data>
+  <data key="d7">NTLM</data>
+  <data key="d8">Network</data>
+</edge>
+<edge source="computer:C17693" target="computer:C1173" id="1">
+  <data key="d2">resolves</data>
+  <data key="d3">151994</data>
+  <data key="d4">dns</data>
+  <data key="d5">False</data>
+</edge>
+<edge source="computer:C17693" target="computer:C294" id="0">
+  <data key="d2">authenticates_to</data>
+  <data key="d3">153792</data>
+  <data key="d4">auth</data>
+  <data key="d5">True</data>
+  <data key="d7">NTLM</data>
+  <data key="d8">RemoteInteractive</data>
+</edge>
+<edge source="computer:C17693" target="computer:C294" id="1">
+  <data key="d2">resolves</data>
+  <data key="d3">153793</data>
+  <data key="d4">dns</data>
+  <data key="d5">False</data>
+</edge>
+<edge source="computer:C17693" target="process:P16" id="0">
+  <data key="d2">executes</data>
+  <data key="d3">151640</data>
+  <data key="d4">proc</data>
+  <data key="d5">False</data>
+  <data key="d9">Start</data>
+</edge>
+<edge source="computer:C17693" target="process:P44" id="0">
+  <data key="d2">executes</data>
+  <data key="d3">151990</data>
+  <data key="d4">proc</data>
+  <data key="d5">False</data>
+  <data key="d9">Start</data>
+</edge>
+<edge source="computer:C17693" target="process:P77" id="0">
+  <data key="d2">executes</data>
+  <data key="d3">153790</data>
+  <data key="d4">proc</data>
+  <data key="d5">False</data>
+  <data key="d9">Start</data>
+</edge>
+<edge source="computer:C728" target="process:P99" id="0">
+  <data key="d2">executes</data>
+  <data key="d3">151650</data>
+  <data key="d4">proc</data>
+  <data key="d5">False</data>
+  <data key="d9">Start</data>
+</edge>
+<edge source="user:U6115@DOM1" target="computer:C17693" id="0">
+  <data key="d2">uses</data>
+  <data key="d3">151993</data>
+  <data key="d4">auth</data>
+  <data key="d5">True</data>
+  <data key="d6">Success</data>
+</edge>
+<edge source="user:U6115@DOM1" target="computer:C17693" id="1">
+  <data key="d2">uses</data>
+  <data key="d3">151990</data>
+  <data key="d4">proc</data>
+  <data key="d5">False</data>
+</edge>
+<edge source="user:U6115@DOM1" target="user:U6115@DOM1" id="0">
+  <data key="d2">authenticates_as</data>
+  <data key="d3">151993</data>
+  <data key="d4">auth</data>
+  <data key="d5">True</data>
+</edge>
+<edge source="user:U636@DOM1" target="computer:C17693" id="0">
+  <data key="d2">uses</data>
+  <data key="d3">153792</data>
+  <data key="d4">auth</data>
+  <data key="d5">True</data>
+  <data key="d6">Success</data>
+</edge>
+<edge source="user:U636@DOM1" target="computer:C17693" id="1">
+  <data key="d2">uses</data>
+  <data key="d3">153790</data>
+  <data key="d4">proc</data>
+  <data key="d5">False</data>
+</edge>
+<edge source="user:U636@DOM1" target="user:U636@DOM1" id="0">
+  <data key="d2">authenticates_as</data>
+  <data key="d3">153792</data>
+  <data key="d4">auth</data>
+  <data key="d5">True</data>
+</edge>
+</graph></graphml>
