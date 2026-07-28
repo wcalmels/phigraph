@@ -53,7 +53,9 @@ jobs:
       - name: Install wheel smoke test
         run: |
           python -m venv /tmp/phigraph-wheel-test
-          /tmp/phigraph-wheel-test/bin/pip install dist/*.whl
+          WHEEL_PATH=$(find dist -maxdepth 1 -name "*.whl" -print -quit)
+          test -n "$WHEEL_PATH"
+          /tmp/phigraph-wheel-test/bin/pip install "${WHEEL_PATH}[api,benchmark,auth,app]"
           /tmp/phigraph-wheel-test/bin/python -c "import phigraph; from phigraph.version import CORE_VERSION; assert CORE_VERSION == '4.0.0'"
       - uses: actions/upload-artifact@v4
         with:
@@ -67,4 +69,6 @@ jobs:
       - uses: actions/checkout@v4
       - name: Build image
         run: docker build --tag phigraph:${{ github.sha }} .
+
+
 
