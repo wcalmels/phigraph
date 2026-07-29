@@ -13,7 +13,7 @@ WORKDIR /app
 COPY pyproject.toml README.md LICENSE ./
 COPY src ./src
 
-RUN pip install --no-cache-dir ".[api]"
+RUN pip install --no-cache-dir ".[api,benchmark,auth]"
 
 RUN useradd --create-home --uid 10001 phigraph \
     && mkdir -p /app/data \
