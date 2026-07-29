@@ -7,6 +7,12 @@
 **Contact:** wcalmels@phi47.cl  
 **Paper license:** CC BY 4.0
 
+This revision adds Section 4.5 (HAV v0.2 architecture and fail-closed policy),
+Section 5.3 (HAV verification scenarios), an "HAV validity" limitations
+paragraph, and the corresponding related-work, keyword, and reproducibility
+updates, so the paper covers the HAV v0.2 module integrated into the
+repository alongside PhiGraph Core 4.0.0.
+
 ## Build
 
 From this directory:

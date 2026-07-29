@@ -42,9 +42,14 @@ scope-tagged, tamper-evident ledger; and places policy evaluation between agent
 proposals and operational execution. Replay and shadow modes cannot execute
 external actions, while higher-authority modes require both an explicit
 executor and an allowing policy decision. We describe the protocol, runtime,
-ledger, deployment boundaries, and Python implementation. Engineering
-verification comprises 117 automated tests; the continuous-integration
-configuration targets Python 3.10--3.13. An initial external experiment on the CIC-IDS2017
+ledger, deployment boundaries, and Python implementation. Building on this
+substrate, we additionally describe PhiGraph HAV v0.2, a fail-closed
+verification layer that extracts claims from agent-generated text, checks them
+against an explicitly supplied authoritative state, and records the resulting
+claims, evidence, verifications, and policy decisions in the same ledger.
+Engineering verification comprises 128 automated tests (117 core tests and 11
+HAV-specific tests); the continuous-integration configuration targets Python
+3.10--3.13. An initial external experiment on the CIC-IDS2017
 Friday DDoS flow file compares a PhiGraph relational score with three
 unsupervised baselines. Local Outlier Factor is strongest on this tabular
 benchmark; PhiGraph ranks second by PR-AUC and attains 0.840 precision at a
@@ -57,7 +62,7 @@ correctness, causal identification, or safe autonomous operation.
 
 \noindent\textbf{Keywords:} AI governance; software agents; provenance;
 evidence ledger; graph intelligence; policy enforcement; shadow deployment;
-reproducible software
+claim verification; reproducible software
 
 \section{Introduction}
 
@@ -85,7 +90,7 @@ records relationships among claims, evidence, verification results, policies,
 approvals, and outcomes so that a decision can be reconstructed after the
 fact.
 
-This paper makes four contributions:
+This paper makes five contributions:
 
 \begin{enumerate}[leftmargin=*]
   \item a typed protocol for claims, evidence, verifications, action proposals,
@@ -93,7 +98,10 @@ This paper makes four contributions:
   \item a runtime in which policy evaluation and an explicit executor are
         necessary conditions for external action;
   \item a backend-neutral, scope-tagged ledger with hash-chain integrity
-        metadata and optional HMAC evidence signatures; and
+        metadata and optional HMAC evidence signatures;
+  \item HAV v0.2, a fail-closed extension that verifies agent-generated
+        textual claims against an authoritative external state and records
+        the result through the same protocol and ledger; and
   \item a bounded empirical evaluation comprising software verification and an
         external anomaly-ranking experiment, together with explicit threats to
         validity.
@@ -135,7 +143,24 @@ PhiGraph's deny-by-default policy, approval requirements, idempotency controls,
 and shadow-first deployment are engineering controls relevant to these risks;
 they are not a complete security solution.
 
+\subsection{Automated claim verification}
+
+Large language models can generate fluent text that is not supported by, or
+directly contradicts, available evidence, a phenomenon surveyed broadly across
+natural-language-generation tasks \cite{ji2023hallucination}. FEVER established
+claim verification against textual evidence as a distinct research problem,
+using retrieval and entailment models over a large Wikipedia-derived claim set
+\cite{thorne2018fever}. PhiGraph's HAV extension (Section~\ref{sec:hav})
+targets a narrower, operational instance of this problem: claims that an
+AI agent makes about the status of a software system, checked against a
+caller-supplied authoritative state rather than an open-domain knowledge base.
+It does not use a trained entailment model and does not claim comparable
+coverage or accuracy to FEVER-style systems; its contribution is a fail-closed
+policy binding between extracted claims and PhiGraph's existing evidence
+ledger and governance protocol.
+
 \section{System Model and Design Goals}
+\label{sec:systemmodel}
 
 Let an agent produce a proposal
 \[
@@ -166,6 +191,7 @@ PhiGraph is designed around six goals:
 \end{enumerate}
 
 \section{PhiGraph Architecture}
+\label{sec:architecture}
 
 \begin{figure}[t]
 \centering
@@ -271,11 +297,98 @@ authentication and network boundary. Scope headers are application metadata
 and query filters; the present implementation does not provide end-to-end
 tenant isolation or same-scope referential-integrity guarantees.
 
+\subsection{Human-Assisted Verification (HAV v0.2)}
+\label{sec:hav}
+
+HAV v0.2 is an additive module (\texttt{phigraph.hav}) that checks candidate
+textual output from an AI agent, such as a status summary or a release note,
+against an authoritative state supplied explicitly by the caller, and records
+the outcome through the existing Core protocol and ledger described in
+Section~\ref{sec:architecture}. HAV does not modify the ledger, policy engine,
+or runtime described above; it is a client of that protocol.
+
+\paragraph{Pipeline.} A verification request carries a candidate output string
+and an \texttt{AuthoritativeState}: a set of source-attributed evidence facts,
+or an explicit \emph{unavailable} marker with a reason. A hybrid extractor
+combines fixed regular-expression patterns for structured, repository-style
+predicates (for example, test counts, CI or CodeQL status, and global
+success or production-readiness phrasing) with a second extractor that
+flags generic factual-looking substrings (percentages, dates, quantities,
+and source attributions) without asserting their truth. Every claim produced
+by the second extractor is marked \texttt{requires\_external\_grounding=true}
+and is not treated as verified evidence on its own. A verifier then compares
+each claim against the authoritative state by subject and predicate, and
+classifies it as supported, contradicted, unsupported, partially supported, or
+having insufficient evidence.
+
+\paragraph{Fail-closed policy.} A dedicated policy,
+\texttt{PHIGRAPH\_HAV\_FAIL\_CLOSED\_V1}, converts claim evaluations into one
+of five verdicts:
+
+\[
+V(s, E) =
+\begin{cases}
+\textsc{source\_unavailable} & \text{if the authoritative state } s \text{ is unavailable} \\
+\textsc{reject} & \text{if a critical claim in } E \text{ is contradicted} \\
+\textsc{human\_review} & \text{if a critical claim in } E \text{ lacks sufficient evidence} \\
+\textsc{warn} & \text{if any non-critical claim in } E \text{ is not supported} \\
+\textsc{pass} & \text{otherwise,}
+\end{cases}
+\]
+
+evaluated in the listed order, where $E$ is the set of claim evaluations for a
+request. Verdicts map onto the existing PhiGraph policy-decision effects of
+Section~\ref{sec:architecture} as shown in Table~\ref{tab:hav-mapping}; in
+particular, an unavailable authoritative source blocks the action rather than
+defaulting to a permissive outcome.
+
+\begin{table}[H]
+\centering
+\small
+\caption{Mapping from HAV verdicts to PhiGraph Core policy effects.}
+\label{tab:hav-mapping}
+\begin{tabular}{ll}
+\toprule
+HAV verdict & Core policy effect \\
+\midrule
+\textsc{pass} & \texttt{allow} \\
+\textsc{warn} & \texttt{warn} \\
+\textsc{reject} & \texttt{block} \\
+\textsc{human\_review} & \texttt{require\_approval} \\
+\textsc{source\_unavailable} & \texttt{block} \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\paragraph{Ledger integration and receipts.} For each request, HAV registers
+the supplied evidence facts as \texttt{Evidence} records, registers each
+extracted claim as a \texttt{Claim} record, records a \texttt{Verification}
+per claim, registers an \texttt{ActionProposal} representing acceptance of the
+candidate output, and records a \texttt{PolicyDecision} carrying the mapped
+effect. A \texttt{HAVReceipt} bundling the verdict, claim evaluations, and a
+SHA-256 hash of the candidate output is itself stored as ledger evidence and,
+when a receipt-signing key is configured, signed with the same HMAC-SHA256
+mechanism used elsewhere in Core. Tenant and project identifiers supplied with
+the request propagate to every record, consistent with the scope-tagging goal
+in Section~\ref{sec:systemmodel}.
+
+\paragraph{Security posture.} HAV never executes candidate output or any
+generated code; it only pattern-matches and compares strings. It does not
+persist a database file, and the packaged module contains no embedded
+credentials. The HTTP endpoints (\texttt{/v3/hav/verify},
+\texttt{/v3/hav/factual/extract}, \texttt{/v3/hav/consistency}) accept an
+optional \texttt{PHIGRAPH\_HAV\_API\_KEY}; when set, requests must present a
+matching \texttt{X-API-Key} header, compared using constant-time comparison,
+and are otherwise rejected. Multi-output consistency checking (shared-token
+overlap and conflicting status terms across several candidate outputs) is
+exposed only as an auxiliary diagnostic signal, not as a verification result
+on its own, and does not influence the policy decision above.
+
 \section{Evaluation}
 
 \subsection{Research questions}
 
-The evaluation addresses two bounded questions:
+The evaluation addresses three bounded questions:
 
 \begin{description}[leftmargin=2.3cm,style=nextline]
   \item[RQ1] Is the software version mechanically testable across its supported Python
@@ -283,25 +396,54 @@ The evaluation addresses two bounded questions:
   \item[RQ2] Does the current relational anomaly score produce useful rankings
   on one external network-flow benchmark relative to simple unsupervised
   baselines?
+  \item[RQ3] Does the HAV fail-closed policy produce the intended blocking or
+  passing behavior on hand-constructed scenarios covering a contradicted
+  critical claim, an unavailable authoritative source, and a supported
+  numeric claim?
 \end{description}
 
 It does not test whether PhiGraph prevents all unsafe agent actions, proves
-causality, or outperforms specialized state-of-the-art intrusion-detection
-systems.
+causality, outperforms specialized state-of-the-art intrusion-detection
+systems, or measures HAV's claim-extraction accuracy against a labeled claim
+corpus.
 
 \subsection{Software verification}
 
-The software tree contains 117 automated tests covering protocol records, ledger
-integrity, policy evaluation, runtime modes, persistence backends, API and SDK
-boundaries, agent workflows, graph operations, benchmarks, and deployment
-configuration. Continuous integration is configured to install the declared
-extras and run the suite on Python 3.10, 3.11, 3.12, and 3.13; separate jobs
-build the Python distribution, install its wheel in an isolated environment,
-and build the Docker image. A local run on July 27, 2026 executed all 117 tests
-successfully. A separate synthetic benchmark attempt under local Python 3.14,
-which is outside the CI matrix, stopped with an ARPACK eigensolver error and is
-excluded from the reported empirical results. Passing tests establish
-conformance to encoded cases, not correctness for all deployments.
+The software tree contains 128 automated tests: 117 core tests covering
+protocol records, ledger integrity, policy evaluation, runtime modes,
+persistence backends, API and SDK boundaries, agent workflows, graph
+operations, benchmarks, and deployment configuration, plus 11 HAV-specific
+tests covering claim extraction, connectors, the fail-closed policy, the API
+surface, and API-key enforcement. Continuous integration is configured to
+install the declared extras and run the suite on Python 3.10, 3.11, 3.12, and
+3.13; separate jobs build the Python distribution, install its wheel in an
+isolated environment, and build the Docker image. A local run on July 29, 2026
+executed all 128 tests successfully. A separate synthetic benchmark attempt
+under local Python 3.14, which is outside the CI matrix, stopped with an
+ARPACK eigensolver error and is excluded from the reported empirical results.
+Passing tests establish conformance to encoded cases, not correctness for all
+deployments.
+
+\subsection{HAV verification scenarios}
+\label{sec:hav-scenarios}
+
+To address RQ3, we exercised the running HAV API with three scenarios chosen
+to cover the fail-closed policy's distinguishing branches, in addition to the
+11 automated unit and integration tests. In the first, the candidate output
+asserts that all checks passed and the repository is production-ready while
+the supplied authoritative state marks CodeQL as failed and the release gate
+as blocked; the policy returned \textsc{reject}, mapped to a \texttt{block}
+policy decision recorded in the ledger. In the second, the authoritative
+source was marked unavailable; the policy returned
+\textsc{source\_unavailable}, also mapped to \texttt{block}, rather than
+defaulting to a permissive outcome. In the third, the candidate output
+correctly reports a numeric test count that matches the supplied evidence; the
+policy returned \textsc{pass}. All three outcomes matched the behavior implied
+by the policy definition in Section~\ref{sec:hav}. This is a confirmation of
+implemented decision logic on hand-constructed inputs, not a statistical
+evaluation of extraction accuracy, adversarial robustness, or coverage over
+naturally occurring agent output; the pattern-based extractor is not expected
+to generalize beyond the repository-status vocabulary encoded in its rules.
 
 \subsection{External anomaly-ranking experiment}
 
@@ -373,6 +515,20 @@ unauthorized changes only under an appropriate trust and key-management model.
 JSON and SQLite are evaluation backends; production use requires hardened
 storage, secrets management, authorization, monitoring, and backup procedures.
 
+\paragraph{HAV validity.}
+HAV's claim extractor is pattern- and rule-based, not a trained language or
+entailment model; its structured extractor recognizes a fixed vocabulary of
+repository-status phrasing in English and Spanish, and its factual extractor
+flags generic percentage, date, quantity, and attribution patterns without
+grounding them. Recall and precision on naturally occurring agent output are
+therefore unmeasured, and the three scenarios in Section~\ref{sec:hav-scenarios}
+are illustrative confirmations of policy logic, not a benchmark. Verification only compares
+extracted claims to caller-supplied evidence; HAV does not independently
+retrieve or authenticate that evidence, so an incorrect or manipulated
+authoritative state can still produce an incorrect verdict. Multi-output
+consistency checking is a lexical overlap heuristic and is explicitly
+documented as an auxiliary signal rather than proof of factual agreement.
+
 \paragraph{Causal and governance claims.}
 Graph connectivity, spectral structure, and anomaly scores do not identify
 causal effects without assumptions and suitable interventions. PhiGraph records
@@ -395,6 +551,16 @@ The software test suite can be reproduced with:
 python -m venv .venv
 pip install -e ".[api,benchmark,dev,auth,app]"
 pytest
+\end{verbatim}
+
+The HAV-specific tests can be run in isolation with:
+
+\begin{verbatim}
+pytest tests/test_hav_core_integration.py tests/test_hav_api.py \
+       tests/test_hav_v02_connectors.py \
+       tests/test_hav_v02_factual_consistency.py \
+       tests/test_hav_v02_benchmark.py \
+       tests/test_hav_v02_api_security.py
 \end{verbatim}
 
 The CIC-IDS2017 experiment requires the Friday DDoS CSV and is run with:
@@ -431,13 +597,18 @@ authority. Claims must remain linked to evidence and verification; actions must
 remain subject to policy and explicit execution boundaries; outcomes must
 remain auditable. Version 4.0.0 demonstrates this design through a typed
 protocol, tamper-evident ledger, policy-gated runtime, scope-tagged records, and
-an automated test suite. The external CIC-IDS2017 experiment shows a functional
-relational anomaly score but also illustrates why bounded interpretation is
-necessary: a conventional LOF baseline performs best, and the dataset cannot
-exercise PhiGraph's full heterogeneous graph model. Future work should
-prioritize independent replication, corrected and chronological security
-datasets, multi-source operational graphs, policy-adversarial testing,
-cryptographically anchored audit storage, and prospective shadow deployments.
+an automated test suite. HAV v0.2 extends the same design to a concrete
+instance of the problem: it treats agent-generated status claims as unverified
+until checked against an explicitly supplied authoritative state, and it fails
+closed, rather than open, when that state is unavailable. The external
+CIC-IDS2017 experiment shows a functional relational anomaly score but also
+illustrates why bounded interpretation is necessary: a conventional LOF
+baseline performs best, and the dataset cannot exercise PhiGraph's full
+heterogeneous graph model. Future work should prioritize independent
+replication, corrected and chronological security datasets, multi-source
+operational graphs, a trained or retrieval-based claim extractor evaluated
+against a labeled corpus, policy-adversarial testing, cryptographically
+anchored audit storage, and prospective shadow deployments.
 
 \section*{Author Contributions}
 
