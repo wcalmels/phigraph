@@ -1,6 +1,8 @@
 from __future__ import annotations
 
-from fastapi import Header, HTTPException, status
+import hmac
+
+from fastapi import HTTPException, status
 
 from .config import DeploymentSettings
 
@@ -9,9 +11,16 @@ def verify_api_key(
     settings: DeploymentSettings,
     x_api_key: str | None,
 ) -> None:
-    if not settings.api_key:
+    """Reject requests when a deployment API key is configured but missing/wrong.
+
+    Uses constant-time comparison. When no key is configured (local/dev),
+    authentication is intentionally skipped.
+    """
+    expected = settings.api_key
+    if not expected:
         return
-    if x_api_key != settings.api_key:
+    provided = x_api_key or ""
+    if not hmac.compare_digest(provided, expected):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid API key.",

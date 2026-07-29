@@ -1,0 +1,62 @@
+# Build the production image on every push/PR that touches deploy paths.
+# Actual VPS rollout is manual via docs/deployment/DONWEB_PILOT_RUNBOOK.md
+# (DonWeb has no first-class GitHub Actions runner; SSH deploy stays explicit).
+
+name: Pilot deploy image
+
+on:
+  push:
+    branches: [main, feature/pilot-deploy-artifacts]
+    paths:
+      - "Dockerfile"
+      - "docker-compose.prod.yml"
+      - "deploy/**"
+      - "src/phigraph/deployment/**"
+      - "pyproject.toml"
+  pull_request:
+    paths:
+      - "Dockerfile"
+      - "docker-compose.prod.yml"
+      - "deploy/**"
+      - "src/phigraph/deployment/**"
+      - "pyproject.toml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  compose-config:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate compose file
+        run: |
+          cp deploy/.env.prod.example .env
+          docker compose -f docker-compose.prod.yml config >/dev/null
+
+  image:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build production image
+        run: docker build --tag phigraph-api:pilot-${{ github.sha }} .
+      - name: Smoke health inside container
+        run: |
+          docker run --rm -d --name phigraph-smoke \
+            -e PHIGRAPH_ENV=production \
+            -e PHIGRAPH_SHADOW_ONLY=true \
+            -e PHIGRAPH_REAL_CONNECTORS_ENABLED=false \
+            -e PHIGRAPH_JWT_SECRET=ci-smoke-secret \
+            -e PHIGRAPH_DATA_DIR=/app/data \
+            phigraph-api:pilot-${{ github.sha }}
+          for i in $(seq 1 30); do
+            if docker exec phigraph-smoke python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=2)"; then
+              docker stop phigraph-smoke
+              exit 0
+            fi
+            sleep 2
+          done
+          docker logs phigraph-smoke || true
+          docker stop phigraph-smoke || true
+          exit 1

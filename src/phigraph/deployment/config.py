@@ -21,6 +21,13 @@ class DeploymentSettings:
     max_request_rows: int = 100000
     api_key: str | None = None
     database_url: str = "sqlite:///data/phigraph.db"
+    jwt_secret: str | None = None
+    jwt_issuer: str = "phigraph-pilot"
+    jwt_audience: str = "phigraph-api"
+    signing_key: str | None = None
+    rate_limit: int = 120
+    rate_window_seconds: int = 60
+    public_base_url: str | None = None
 
     def validate(self) -> None:
         if self.environment not in {"development", "test", "staging", "production"}:
@@ -33,11 +40,19 @@ class DeploymentSettings:
             raise ValueError("Real connectors are disabled in v1.9.")
         if self.max_request_rows <= 0:
             raise ValueError("max_request_rows must be positive.")
+        if self.rate_limit <= 0 or self.rate_window_seconds <= 0:
+            raise ValueError("rate_limit and rate_window_seconds must be positive.")
+        if self.environment == "production" and not (self.api_key or self.jwt_secret):
+            raise ValueError(
+                "Production deployments require PHIGRAPH_API_KEY and/or "
+                "PHIGRAPH_JWT_SECRET for authenticated pilot access."
+            )
 
     def to_dict(self) -> dict:
         payload = asdict(self)
-        if payload.get("api_key"):
-            payload["api_key"] = "***"
+        for secret_field in ("api_key", "jwt_secret", "signing_key"):
+            if payload.get(secret_field):
+                payload[secret_field] = "***"
         return payload
 
 
@@ -88,6 +103,13 @@ def load_settings() -> DeploymentSettings:
             "PHIGRAPH_DATABASE_URL",
             "sqlite:///data/phigraph.db",
         ),
+        jwt_secret=os.getenv("PHIGRAPH_JWT_SECRET"),
+        jwt_issuer=os.getenv("PHIGRAPH_JWT_ISSUER", "phigraph-pilot"),
+        jwt_audience=os.getenv("PHIGRAPH_JWT_AUDIENCE", "phigraph-api"),
+        signing_key=os.getenv("PHIGRAPH_SIGNING_KEY"),
+        rate_limit=int(os.getenv("PHIGRAPH_RATE_LIMIT", "120")),
+        rate_window_seconds=int(os.getenv("PHIGRAPH_RATE_WINDOW_SECONDS", "60")),
+        public_base_url=os.getenv("PHIGRAPH_PUBLIC_BASE_URL"),
     )
     settings.validate()
     return settings

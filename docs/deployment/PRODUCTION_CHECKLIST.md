@@ -1,5 +1,9 @@
 # PhiGraph 4.0 Production Checklist
 
+For the current closed pilot on DonWeb, follow
+[`DONWEB_PILOT_RUNBOOK.md`](DONWEB_PILOT_RUNBOOK.md) first. The items below
+are the bar for a multi-customer commercial deployment beyond the pilot.
+
 - Use PostgreSQL for multi-instance deployments.
 - Apply all Core v3 SQL migrations and verify Row-Level Security with a non-superuser role.
 - Configure OIDC/JWKS and disable trusted identity headers unless protected by an authenticated proxy.

@@ -151,6 +151,17 @@ def create_app(
     )
     app.include_router(create_general_platform_router())
     app.include_router(create_cyber_mvp_router())
-    app.include_router(create_core_v3_router(settings.data_dir))
+    app.include_router(
+        create_core_v3_router(
+            settings.data_dir,
+            api_key=settings.api_key,
+            signing_key=settings.signing_key,
+            jwt_secret=settings.jwt_secret,
+            jwt_issuer=settings.jwt_issuer,
+            jwt_audience=settings.jwt_audience,
+            rate_limit=settings.rate_limit,
+            rate_window_seconds=settings.rate_window_seconds,
+        )
+    )
 
     return app

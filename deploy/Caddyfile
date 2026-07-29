@@ -1,0 +1,32 @@
+# Caddy reverse proxy for the closed pilot.
+# TLS certificates are obtained automatically from Let's Encrypt.
+
+{$PHIGRAPH_DOMAIN:phigraph.phi47.cl} {
+	email {$ACME_EMAIL:wcalmels@phi47.cl}
+
+	encode gzip
+
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "DENY"
+		Referrer-Policy "no-referrer"
+		-Server
+	}
+
+	# Health probes stay public so uptime monitors and Docker healthchecks work.
+	# /v3/health/ready requires auth; only /v3/health/live is public at the Core layer.
+	@public path /health /ready /v3/health/live
+	handle @public {
+		reverse_proxy api:8000
+	}
+
+	handle {
+		reverse_proxy api:8000
+	}
+
+	log {
+		output stdout
+		format console
+	}
+}
