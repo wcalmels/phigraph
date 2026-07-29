@@ -3,10 +3,10 @@ title: "TUCH PhiGraph Core"
 message: "If you use PhiGraph in research, cite this software release."
 type: software
 authors:
-  - family-names: "Calmels"
+  - family-names: "Calmels von Dem Knesebeck"
     given-names: "Walter"
+    affiliation: "TUCH Systems"
 version: 4.0.0
-date-released: 2026-07-27
 repository-code: "https://github.com/wcalmels/phigraph"
 license: MIT
 keywords:

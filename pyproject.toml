@@ -9,7 +9,7 @@ description = "Governed relational intelligence, evidence and verification platf
 readme = "README.md"
 requires-python = ">=3.10"
 license = "MIT"
-authors = [{name = "Walter Calmels"}]
+authors = [{name = "Walter Calmels von Dem Knesebeck"}]
 keywords = ["governed-ai", "agent-verification", "graph-intelligence", "evidence-ledger"]
 classifiers = [
   "Development Status :: 4 - Beta",

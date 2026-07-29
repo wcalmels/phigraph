@@ -35,3 +35,11 @@ backups/
 .idea/
 .DS_Store
 Thumbs.db
+
+# LaTeX build artifacts
+paper/*.aux
+paper/*.bbl
+paper/*.blg
+paper/*.out
+paper/*.toc
+paper/*-review.png

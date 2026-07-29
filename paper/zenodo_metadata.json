@@ -1,0 +1,38 @@
+{
+  "metadata": {
+    "title": "PhiGraph Core 4.0: A Shadow-First Evidence Ledger and Policy-Gated Runtime for Software-Agent Operations",
+    "upload_type": "publication",
+    "publication_type": "article",
+    "publication_date": "2026-07-27",
+    "description": "PhiGraph Core 4.0.0 is a model-agnostic governance system for software-agent and AI operations. The paper describes its typed claim-evidence-policy-action protocol, scope-tagged tamper-evident ledger, policy-gated runtime, shadow-first deployment boundary, Python implementation, software verification, and an initial external anomaly-ranking experiment on CIC-IDS2017. Results are interpreted conservatively and include explicit implementation gaps and threats to validity.",
+    "creators": [
+      {
+        "name": "Calmels von Dem Knesebeck, Walter",
+        "affiliation": "TUCH Systems"
+      }
+    ],
+    "contributors": [],
+    "access_right": "open",
+    "license": "cc-by-4.0",
+    "keywords": [
+      "AI governance",
+      "software agents",
+      "evidence ledger",
+      "relational intelligence",
+      "policy enforcement",
+      "shadow deployment",
+      "provenance",
+      "reproducible software"
+    ],
+    "language": "eng",
+    "related_identifiers": [
+      {
+        "identifier": "https://github.com/wcalmels/phigraph",
+        "relation": "isSupplementedBy",
+        "resource_type": "software"
+      }
+    ],
+    "communities": [],
+    "notes": "Paper source is licensed CC BY 4.0. PhiGraph software is distributed separately under the repository software license."
+  }
+}

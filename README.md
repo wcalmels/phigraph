@@ -130,6 +130,11 @@ It is designed to make unsupported claims, missing evidence and unauthorized act
 
 [Read the TUCH PhiGraph Core 4.0.0 Investor Overview](docs/papers/TUCH_PHIGRAPH_CORE_V4_INVESTOR_OVERVIEW.md)
 
+## Scientific paper
+
+[Read the PhiGraph scientific paper](paper/main.pdf) or review its
+[LaTeX source and Zenodo metadata](paper/README.md).
+
 ## Repository policy
 
 The initial GitHub repository should remain **private** until the publication checklist, secret audit and licensing decision have been completed. See [`docs/governance/PUBLICATION_CHECKLIST.md`](docs/governance/PUBLICATION_CHECKLIST.md).
@@ -138,4 +143,4 @@ The initial GitHub repository should remain **private** until the publication ch
 
 The current source package retains its existing MIT license while the repository remains private. Before public release, TUCH should select and obtain legal review for the final model. The recommended commercial strategy is an **AGPL-3.0 community edition plus a separate commercial license** for customers that require proprietary embedding, OEM distribution or closed-source hosted modifications.
 
-Copyright © 2026 Walter Calmels / TUCH Systems.
+Copyright © 2026 Walter Calmels von Dem Knesebeck / TUCH Systems.
