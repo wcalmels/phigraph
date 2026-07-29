@@ -13,7 +13,7 @@ def utc_now() -> str:
 
 
 class Verdict(str, Enum):
-    PASS = "PASS"
+    PASS = "PASS"  # nosec B105 - policy verdict label, not a credential
     WARN = "WARN"
     REJECT = "REJECT"
     HUMAN_REVIEW = "HUMAN_REVIEW"
