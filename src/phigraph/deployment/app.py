@@ -21,6 +21,7 @@ from .platform_app import create_platform_router
 from .general_platform_app import create_general_platform_router
 from phigraph.cyber_mvp.api import create_cyber_mvp_router
 from phigraph.core_v3.api import create_core_v3_router
+from phigraph.hav.api import create_hav_router
 
 
 def _package_version() -> str:
@@ -152,5 +153,6 @@ def create_app(
     app.include_router(create_general_platform_router())
     app.include_router(create_cyber_mvp_router())
     app.include_router(create_core_v3_router(settings.data_dir))
+    app.include_router(create_hav_router(settings.data_dir))
 
     return app
