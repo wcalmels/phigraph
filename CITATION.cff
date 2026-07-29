@@ -1,6 +1,6 @@
 cf-version: 1.2.0
 title: "TUCH PhiGraph Core"
-message: "If you use PhiGraph in research, cite this software release."
+message: "If you use PhiGraph in research, cite this software release and the Zenodo paper."
 type: software
 authors:
   - family-names: "Calmels von Dem Knesebeck"
@@ -15,3 +15,13 @@ keywords:
   - graph intelligence
   - agent verification
   - shadow-first
+preferred-citation:
+  type: article
+  title: "PhiGraph Core 4.0: A Shadow-First Evidence Ledger and Policy-Gated Runtime for Software-Agent Operations"
+  authors:
+    - family-names: "Calmels von Dem Knesebeck"
+      given-names: "Walter"
+      affiliation: "TUCH Systems"
+  doi: "10.5281/zenodo.21689514"
+  url: "https://doi.org/10.5281/zenodo.21689514"
+  license: "CC-BY-4.0"

@@ -4,6 +4,7 @@
 [![Security](https://github.com/wcalmels/phigraph/actions/workflows/security.yml/badge.svg)](https://github.com/wcalmels/phigraph/actions/workflows/security.yml)
 [![Python](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/)
 [![Release](https://img.shields.io/badge/release-4.0.0-2ea44f.svg)](RELEASE_NOTES_V4.0.0.md)
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.21689514.svg)](https://doi.org/10.5281/zenodo.21689514)
 
 **TUCH PhiGraph Core 4.0.0** is a governed relational-intelligence platform for recording, verifying and controlling claims and actions produced by software agents and AI systems.
 
@@ -132,8 +133,10 @@ It is designed to make unsupported claims, missing evidence and unauthorized act
 
 ## Scientific paper
 
-[Read the PhiGraph scientific paper](paper/main.pdf) or review its
-[LaTeX source and Zenodo metadata](paper/README.md).
+Published on Zenodo: [https://doi.org/10.5281/zenodo.21689514](https://doi.org/10.5281/zenodo.21689514)
+
+[Read the PDF in-repo](paper/main.pdf) or review the
+[LaTeX source and metadata](paper/README.md).
 
 ## Repository policy
 

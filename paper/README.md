@@ -5,7 +5,8 @@
 **Author:** Walter Calmels von Dem Knesebeck  
 **Affiliation:** TUCH Systems  
 **Contact:** wcalmels@phi47.cl  
-**Paper license:** CC BY 4.0
+**Paper license:** CC BY 4.0  
+**Zenodo DOI:** [10.5281/zenodo.21689514](https://doi.org/10.5281/zenodo.21689514)
 
 This revision adds Section 4.5 (HAV v0.2 architecture and fail-closed policy),
 Section 5.3 (HAV verification scenarios), an "HAV validity" limitations
