@@ -13,6 +13,19 @@ paragraph, and the corresponding related-work, keyword, and reproducibility
 updates, so the paper covers the HAV v0.2 module integrated into the
 repository alongside PhiGraph Core 4.0.0.
 
+It also adds five vector figures generated from TikZ/pgfplots source (no
+external image files, fully reproducible from `main.tex`):
+
+1. Architecture diagram (agent -> protocol -> core service -> deployment boundary).
+2. Protocol lifecycle diagram (Claim/Evidence/Verification/ActionProposal/PolicyDecision/Outcome).
+3. HAV v0.2 verification pipeline (candidate output -> extractor -> verifier -> policy -> ledger).
+4. HAV fail-closed policy decision flowchart.
+5. CIC-IDS2017 PR-AUC / P@10% bar chart (companion to Table 2).
+
+All figures use `\begin{figure}[H]` (via the `float` package) so they render
+immediately after the paragraph that introduces them instead of drifting to
+the end of the document.
+
 ## Build
 
 From this directory:

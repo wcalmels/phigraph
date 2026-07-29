@@ -10,6 +10,10 @@
 \usepackage{float}
 \usepackage{xcolor}
 \usepackage{hyperref}
+\usepackage{tikz}
+\usetikzlibrary{arrows.meta, positioning, shapes.geometric, calc}
+\usepackage{pgfplots}
+\pgfplotsset{compat=1.18}
 
 \hypersetup{
   colorlinks=true,
@@ -193,22 +197,45 @@ PhiGraph is designed around six goals:
 \section{PhiGraph Architecture}
 \label{sec:architecture}
 
-\begin{figure}[t]
+\begin{figure}[H]
 \centering
-\fbox{\begin{minipage}{0.91\linewidth}
-\centering
-\textbf{Agent or deterministic adapter}\\
-$\downarrow$ proposal: claims and actions\\[2pt]
-\textbf{Protocol layer}\\
-Claim $\leftrightarrow$ Evidence $\leftrightarrow$ Verification\\
-ActionProposal $\leftrightarrow$ PolicyDecision $\leftrightarrow$ Outcome\\[2pt]
-$\downarrow$\\
-\textbf{Core service}\\
-Evidence ledger \quad Policy engine \quad Runtime \quad Telemetry\\[2pt]
-$\downarrow$\\
-\textbf{Deployment boundary}\\
-Replay / Shadow (non-executing) \quad Copilot / Guarded-auto (explicit executor)
-\end{minipage}}
+\resizebox{\linewidth}{!}{%
+\begin{tikzpicture}[
+  node distance=6mm and 6mm,
+  every node/.style={font=\small},
+  box/.style={draw, rounded corners=2pt, align=center, minimum height=0.9cm, inner sep=5pt},
+  lbl/.style={font=\small\bfseries},
+  arr/.style={-{Latex[length=2.4mm]}, thick}
+]
+
+\node[box, fill=blue!10, minimum width=8.6cm] (agent) {Agent or deterministic adapter};
+
+\node[lbl, below=8mm of agent] (protolbl) {Protocol layer};
+\node[box, fill=green!8, minimum width=8.6cm, below=1mm of protolbl] (claimrow)
+  {Claim $\leftrightarrow$ Evidence $\leftrightarrow$ Verification};
+\node[box, fill=green!8, minimum width=8.6cm, below=2mm of claimrow] (actionrow)
+  {ActionProposal $\leftrightarrow$ PolicyDecision $\leftrightarrow$ Outcome};
+
+\node[lbl, below=8mm of actionrow] (corelbl) {Core service};
+\node[box, fill=orange!12, minimum width=2.0cm, below=1mm of corelbl, anchor=north, xshift=-3.25cm] (ledger)
+  {Evidence\\ledger};
+\node[box, fill=orange!12, minimum width=2.0cm, right=3mm of ledger] (policy) {Policy\\engine};
+\node[box, fill=orange!12, minimum width=2.0cm, right=3mm of policy] (runtime) {Runtime};
+\node[box, fill=orange!12, minimum width=2.0cm, right=3mm of runtime] (telemetry) {Telemetry};
+
+\node[lbl, below=8mm of ledger, xshift=3.25cm] (deploylbl) {Deployment boundary};
+\node[box, fill=red!8, minimum width=4.2cm, below=1mm of deploylbl, anchor=north, xshift=-2.2cm] (shadow)
+  {Replay / Shadow\\(non-executing)};
+\node[box, fill=red!8, minimum width=4.2cm, right=3mm of shadow] (guarded)
+  {Copilot / Guarded-auto\\(explicit executor)};
+
+\draw[arr] (agent.south) -- (protolbl.north)
+  node[midway, right, font=\scriptsize, align=left] {proposal:\\claims \& actions};
+\draw[arr] (actionrow.south) -- (corelbl.north);
+\draw[arr] ($(ledger.south)!0.5!(telemetry.south)$) -- (deploylbl.north);
+
+\end{tikzpicture}%
+}
 \caption{PhiGraph separates agent proposals from verification, policy
 evaluation, and execution. Arrows indicate recorded processing relationships,
 not automatic trust propagation.}
@@ -240,7 +267,48 @@ require approval, and block. These states make uncertainty and governance
 decisions explicit instead of collapsing them into a single confidence score.
 The current implementation does not require a non-empty evidence set for every
 verified claim and does not assess evidentiary sufficiency. This is an
-enforcement gap, not a guarantee supplied by the protocol.
+enforcement gap, not a guarantee supplied by the protocol. Figure
+\ref{fig:protocol-lifecycle} shows how the six record types reference one
+another across a full claim-to-outcome cycle.
+
+\begin{figure}[H]
+\centering
+\resizebox{0.56\linewidth}{!}{%
+\begin{tikzpicture}[
+  every node/.style={font=\small},
+  rec/.style={draw, rounded corners=2pt, align=center, fill=blue!8, minimum width=2.6cm, minimum height=0.9cm, inner sep=3pt},
+  arr/.style={-{Latex[length=2.2mm]}, thick},
+  darr/.style={-{Latex[length=2.2mm]}, thick, dashed}
+]
+\node[rec] (claim) at (90:3.1) {Claim};
+\node[rec] (verification) at (30:3.1) {Verification};
+\node[rec] (evidence) at (-30:3.1) {Evidence};
+\node[rec] (action) at (-90:3.1) {ActionProposal};
+\node[rec] (policy) at (-150:3.1) {PolicyDecision};
+\node[rec] (outcome) at (150:3.1) {Outcome};
+
+\draw[arr] (claim) -- (verification);
+\draw[arr] (evidence) -- (verification);
+\draw[darr] (verification) to[bend left=18]
+  node[midway, sloped, above, font=\scriptsize] {updates status} (claim);
+\draw[arr] (claim) -- (action)
+  node[midway, left, font=\scriptsize, align=center, xshift=-2pt] {rationale\\claims};
+\draw[arr] (action) -- (policy);
+\draw[arr] (policy) -- (outcome);
+\draw[darr] (outcome) to[bend left=18]
+  node[midway, sloped, below, font=\scriptsize] {observed effects} (evidence);
+\end{tikzpicture}%
+}
+\caption{The protocol's recorded lifecycle. Solid arrows show synchronous
+references (a verification cites claims and evidence; an action proposal
+cites rationale claims; a policy decision governs a proposal; an outcome
+follows a decision). Dashed arrows show asynchronous feedback: a verification
+updates claim status, and an outcome's observed effects may be registered as
+new evidence for future claims. The cycle is auditable, not automatic --
+each edge corresponds to an explicit recorded reference, not an implicit
+trust relationship.}
+\label{fig:protocol-lifecycle}
+\end{figure}
 
 \subsection{Evidence ledger}
 
@@ -319,7 +387,46 @@ by the second extractor is marked \texttt{requires\_external\_grounding=true}
 and is not treated as verified evidence on its own. A verifier then compares
 each claim against the authoritative state by subject and predicate, and
 classifies it as supported, contradicted, unsupported, partially supported, or
-having insufficient evidence.
+having insufficient evidence. Figure~\ref{fig:hav-pipeline} traces this
+pipeline from candidate output to ledger records.
+
+\begin{figure}[H]
+\centering
+\resizebox{0.72\linewidth}{!}{%
+\begin{tikzpicture}[
+  node distance=5mm and 9mm,
+  box/.style={draw, rounded corners=2pt, align=center, font=\small,
+    minimum width=8.0cm, minimum height=0.85cm, fill=blue!7, inner sep=5pt},
+  side/.style={draw, rounded corners=2pt, align=center, font=\scriptsize,
+    minimum width=3.1cm, minimum height=0.85cm, fill=yellow!15, inner sep=4pt},
+  arr/.style={-{Latex[length=2.2mm]}, thick}
+]
+\node[box] (n1) {Candidate output (agent-generated text)};
+\node[box, below=of n1] (n2) {Hybrid extractor: structured regex patterns + factual pattern flags};
+\node[box, below=of n2] (n3) {Extracted claims (some marked \texttt{requires\_external\_grounding})};
+\node[box, below=of n3] (n4) {Verifier: per-claim comparison against authoritative state};
+\node[side, right=of n4] (auth) {\textsc{AuthoritativeState}\\(evidence facts, or \emph{unavailable})};
+\node[box, below=of n4] (n5) {Claim evaluations: supported / contradicted / unsupported / partial / insufficient};
+\node[box, below=of n5] (n6) {Fail-closed policy $V(s,E)$ (Fig.~\ref{fig:hav-flow})};
+\node[box, below=of n6, fill=green!10] (n7)
+  {Verdict + ledger records: \texttt{Evidence}, \texttt{Claim}, \texttt{Verification},\\
+   \texttt{ActionProposal}, \texttt{PolicyDecision}, \texttt{HAVReceipt}};
+
+\draw[arr] (n1) -- (n2);
+\draw[arr] (n2) -- (n3);
+\draw[arr] (n3) -- (n4);
+\draw[arr] (auth) -- (n4);
+\draw[arr] (n4) -- (n5);
+\draw[arr] (n5) -- (n6);
+\draw[arr] (n6) -- (n7);
+\end{tikzpicture}%
+}
+\caption{HAV v0.2 verification pipeline. The authoritative state is supplied
+by the caller, not retrieved by HAV, and merges into the verifier stage; an
+unavailable state is itself a valid input that the fail-closed policy
+(Figure~\ref{fig:hav-flow}) maps to a blocking verdict.}
+\label{fig:hav-pipeline}
+\end{figure}
 
 \paragraph{Fail-closed policy.} A dedicated policy,
 \texttt{PHIGRAPH\_HAV\_FAIL\_CLOSED\_V1}, converts claim evaluations into one
@@ -337,10 +444,50 @@ V(s, E) =
 \]
 
 evaluated in the listed order, where $E$ is the set of claim evaluations for a
-request. Verdicts map onto the existing PhiGraph policy-decision effects of
+request. Figure~\ref{fig:hav-flow} renders this evaluation order as a decision
+flowchart. Verdicts map onto the existing PhiGraph policy-decision effects of
 Section~\ref{sec:architecture} as shown in Table~\ref{tab:hav-mapping}; in
 particular, an unavailable authoritative source blocks the action rather than
 defaulting to a permissive outcome.
+
+\begin{figure}[H]
+\centering
+\resizebox{0.92\linewidth}{!}{%
+\begin{tikzpicture}[
+  node distance=7mm and 14mm,
+  decision/.style={draw, diamond, aspect=2.6, align=center, font=\scriptsize,
+    inner sep=1pt, fill=gray!10},
+  terminal/.style={draw, rounded corners=2pt, align=center, font=\scriptsize\bfseries,
+    minimum width=2.7cm, minimum height=0.75cm},
+  arr/.style={-{Latex[length=2mm]}, thick}
+]
+\node[decision] (d1) {authoritative state\\$s$ unavailable?};
+\node[terminal, fill=red!18, right=of d1] (t1) {SOURCE\_\\UNAVAILABLE};
+\node[decision, below=of d1] (d2) {critical claim\\contradicted?};
+\node[terminal, fill=red!18, right=of d2] (t2) {REJECT};
+\node[decision, below=of d2] (d3) {critical claim has\\insufficient evidence?};
+\node[terminal, fill=orange!18, right=of d3] (t3) {HUMAN\_REVIEW};
+\node[decision, below=of d3] (d4) {non-critical claim\\unsupported?};
+\node[terminal, fill=yellow!25, right=of d4] (t4) {WARN};
+\node[terminal, fill=green!18, below=of d4] (t5) {PASS};
+
+\draw[arr] (d1) -- node[above, font=\tiny] {yes} (t1);
+\draw[arr] (d1) -- node[right, font=\tiny] {no} (d2);
+\draw[arr] (d2) -- node[above, font=\tiny] {yes} (t2);
+\draw[arr] (d2) -- node[right, font=\tiny] {no} (d3);
+\draw[arr] (d3) -- node[above, font=\tiny] {yes} (t3);
+\draw[arr] (d3) -- node[right, font=\tiny] {no} (d4);
+\draw[arr] (d4) -- node[above, font=\tiny] {yes} (t4);
+\draw[arr] (d4) -- node[right, font=\tiny] {no} (t5);
+\end{tikzpicture}%
+}
+\caption{Decision flowchart for the fail-closed policy $V(s,E)$. Branches are
+evaluated top to bottom; the first matching condition determines the verdict,
+so an unavailable source always blocks regardless of claim content, and a
+fully supported claim set only reaches \textsc{pass} after every stricter
+condition fails.}
+\label{fig:hav-flow}
+\end{figure}
 
 \begin{table}[H]
 \centering
@@ -479,6 +626,37 @@ Robust deviation     & 0.5771 & 0.5540 & 0.4117 & 0.0823 & 0.1372 & 0.006\\
 \bottomrule
 \end{tabular}
 \end{table}
+
+\begin{figure}[H]
+\centering
+\begin{tikzpicture}
+\begin{axis}[
+  ybar,
+  bar width=9pt,
+  width=0.98\linewidth, height=6.2cm,
+  symbolic x coords={LOF,PhiGraph,IF,RD},
+  xtick=data,
+  xticklabels={Local Outlier Factor, PhiGraph relational, Isolation Forest, Robust deviation},
+  x tick label style={font=\scriptsize},
+  ymin=0, ymax=1.05,
+  ylabel={Score}, ylabel style={font=\small},
+  legend style={font=\scriptsize, at={(0.5,1.14)}, anchor=north, legend columns=-1, draw=none},
+  enlarge x limits=0.2,
+  nodes near coords, every node near coord/.append style={font=\tiny},
+  axis lines*=left,
+  tick align=outside,
+]
+\addplot[fill=blue!45] coordinates {(LOF,0.9506) (PhiGraph,0.7316) (IF,0.6840) (RD,0.5540)};
+\addplot[fill=orange!65] coordinates {(LOF,0.9617) (PhiGraph,0.8400) (IF,0.7817) (RD,0.4117)};
+\legend{PR-AUC, P@10\%}
+\end{axis}
+\end{tikzpicture}
+\caption{PR-AUC and precision at a 10\% alert budget for each method on the
+CIC-IDS2017 Friday DDoS experiment (same run as Table~\ref{tab:cicids}). Local
+Outlier Factor dominates on both metrics; the PhiGraph relational score ranks
+second, ahead of Isolation Forest and robust deviation.}
+\label{fig:cicids-bars}
+\end{figure}
 
 LOF is clearly strongest on this experiment. PhiGraph is second by PR-AUC and
 precision at budget, but its ROC-AUC is slightly below Isolation Forest.
