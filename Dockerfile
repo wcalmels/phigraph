@@ -2,10 +2,11 @@ FROM python:3.12-slim
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
-    PHIGRAPH_ENV=production \
+    PHIGRAPH_ENV=staging \
     PHIGRAPH_SHADOW_ONLY=true \
     PHIGRAPH_REAL_CONNECTORS_ENABLED=false \
-    PHIGRAPH_DATA_DIR=/app/data
+    PHIGRAPH_DATA_DIR=/app/data \
+    PHIGRAPH_DATABASE_URL=sqlite:////app/data/phigraph.db
 
 WORKDIR /app
 
