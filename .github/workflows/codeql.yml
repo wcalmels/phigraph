@@ -1,4 +1,4 @@
-﻿name: CodeQL
+name: CodeQL
 
 # Private repositories require GitHub Code Security to upload CodeQL results.
 # Restore push, pull_request, and schedule triggers after enabling that product.
@@ -21,11 +21,11 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Initialize CodeQL
-        uses: github/codeql-action/init@v4
+        uses: github/codeql-action/init@v4.37.3
         with:
           languages: python
           build-mode: none
           queries: security-and-quality
 
       - name: Perform CodeQL analysis
-        uses: github/codeql-action/analyze@v4
+        uses: github/codeql-action/analyze@v4.37.3
