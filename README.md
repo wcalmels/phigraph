@@ -102,7 +102,12 @@ cp .env.example .env
 docker compose up --build
 ```
 
-The included Docker configuration is a starting point for private evaluation. Review [`docs/deployment/PRODUCTION_CHECKLIST.md`](docs/deployment/PRODUCTION_CHECKLIST.md) before any production deployment.
+The included Docker configuration is a starting point for private evaluation.
+For the closed DonWeb pilot (TLS + per-customer JWTs), use
+[`docker-compose.prod.yml`](docker-compose.prod.yml) and follow
+[`docs/deployment/DONWEB_PILOT_RUNBOOK.md`](docs/deployment/DONWEB_PILOT_RUNBOOK.md).
+Review [`docs/deployment/PRODUCTION_CHECKLIST.md`](docs/deployment/PRODUCTION_CHECKLIST.md)
+before any broader production deployment.
 
 ## Safety and scientific scope
 
@@ -123,6 +128,7 @@ It is designed to make unsupported claims, missing evidence and unauthorized act
 - [Python SDK](docs/sdk/PYTHON_SDK.md)
 - [Migration from 3.9](docs/migration/V39_TO_V40.md)
 - [Production checklist](docs/deployment/PRODUCTION_CHECKLIST.md)
+- [DonWeb closed-pilot runbook](docs/deployment/DONWEB_PILOT_RUNBOOK.md)
 - [Roadmap](ROADMAP.md)
 - [Security policy](SECURITY.md)
 - [Licensing strategy](docs/governance/LICENSING_STRATEGY.md)

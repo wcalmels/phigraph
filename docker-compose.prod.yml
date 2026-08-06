@@ -1,0 +1,66 @@
+# Closed-pilot stack: PhiGraph API (shadow-only) behind Caddy with automatic TLS.
+#
+# Usage on the VPS:
+#   cp deploy/.env.prod.example .env
+#   # edit secrets
+#   docker compose -f docker-compose.prod.yml up -d --build
+
+services:
+  api:
+    build: .
+    image: phigraph-api:pilot
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      PHIGRAPH_ENV: production
+      PHIGRAPH_SHADOW_ONLY: "true"
+      PHIGRAPH_REAL_CONNECTORS_ENABLED: "false"
+      PHIGRAPH_DATA_DIR: /app/data
+      PHIGRAPH_DATABASE_URL: sqlite:////app/data/phigraph.db
+      PHIGRAPH_PORT: "8000"
+    volumes:
+      - phigraph-pilot-data:/app/data
+    expose:
+      - "8000"
+    read_only: true
+    tmpfs:
+      - /tmp
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=3)",
+        ]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 25s
+
+  caddy:
+    image: caddy:2.8-alpine
+    restart: unless-stopped
+    depends_on:
+      api:
+        condition: service_healthy
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      PHIGRAPH_DOMAIN: ${PHIGRAPH_DOMAIN:-phigraph.phi47.cl}
+      ACME_EMAIL: ${ACME_EMAIL:-wcalmels@phi47.cl}
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    security_opt:
+      - no-new-privileges:true
+
+volumes:
+  phigraph-pilot-data:
+  caddy-data:
+  caddy-config:

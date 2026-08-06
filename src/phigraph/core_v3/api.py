@@ -1,6 +1,7 @@
 from __future__ import annotations
 from phigraph.version import CORE_VERSION, PROTOCOL_LABEL
 
+import hmac
 from pathlib import Path
 from typing import Any, Callable
 
@@ -171,6 +172,7 @@ def create_core_v3_router(
         x_issuer: str = Header(default="api-key"),
         authorization: str | None = Header(default=None),
     ) -> Principal:
+        auth_configured = oidc_validator is not None or jwt_validator is not None or api_key is not None
         if (oidc_validator is not None or jwt_validator is not None) and authorization:
             if not authorization.lower().startswith("bearer "):
                 raise HTTPException(status_code=401, detail="invalid_authorization_header")
@@ -181,9 +183,13 @@ def create_core_v3_router(
             except ValueError as exc:
                 metrics.inc("auth.denied")
                 raise HTTPException(status_code=401, detail=str(exc)) from exc
-        if api_key is not None and x_api_key != api_key:
+        if api_key is not None:
+            if not hmac.compare_digest(x_api_key or "", api_key):
+                metrics.inc("auth.denied")
+                raise HTTPException(status_code=401, detail="invalid_api_key")
+        elif auth_configured:
             metrics.inc("auth.denied")
-            raise HTTPException(status_code=401, detail="invalid_api_key")
+            raise HTTPException(status_code=401, detail="authentication_required")
         if not trusted_identity_headers:
             x_subject, x_role, x_issuer = "api-client", "admin", "api-key"
         try:
