@@ -1,17 +1,19 @@
 from __future__ import annotations
 
+import os
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Header
 from pydantic import BaseModel, Field
 
+from phigraph.core_v3.auth_deps import build_core_auth_dependencies
 from phigraph.core_v3.service import CoreV3Service
 from phigraph.hav.extraction.factual import FactualClaimExtractor
 from phigraph.hav.integration import PhiGraphHAVService
 from phigraph.hav.models import AuthoritativeState, EvidenceFact
-from phigraph.hav.security import require_hav_api_key
 from phigraph.hav.verification_v2.consistency import MultiOutputConsistencyChecker
+from phigraph.version import CORE_VERSION, HAV_VERSION, PROTOCOL_VERSION
 
 
 class HAVEvidenceRequest(BaseModel):
@@ -30,9 +32,10 @@ class HAVVerifyRequest(BaseModel):
     state_available: bool = True
     unavailable_reason: str | None = None
     evidence: list[HAVEvidenceRequest] = Field(default_factory=list)
-    issuer: str = "ai-agent"
-    tenant_id: str = "default"
-    project_id: str = "default"
+    agent_id: str | None = Field(
+        default=None,
+        description="Optional agent identifier recorded as claim issuer; must not equal the verifier identity.",
+    )
 
 
 class HAVFactualExtractRequest(BaseModel):
@@ -43,81 +46,156 @@ class HAVConsistencyRequest(BaseModel):
     outputs: list[str] = Field(min_length=1)
 
 
+
+def _build_state(request: HAVVerifyRequest) -> AuthoritativeState:
+    if request.state_available:
+        facts = [
+            EvidenceFact.create(
+                source=item.source,
+                subject=item.subject,
+                predicate=item.predicate,
+                value=item.value,
+                confidence=item.confidence,
+                scope=item.scope,
+                metadata=item.metadata,
+            )
+            for item in request.evidence
+        ]
+        return AuthoritativeState.create(
+            source_system=request.source_system,
+            evidence=facts,
+        )
+    return AuthoritativeState.unavailable(
+        source_system=request.source_system,
+        reason=request.unavailable_reason or "source unavailable",
+    )
+
+
 def create_hav_router(
     data_dir: str | Path,
     *,
+    service: CoreV3Service | None = None,
     backend: str = "json",
     signing_key: str | None = None,
     receipt_signing_key: str | None = None,
     postgres_dsn: str | None = None,
+    api_key: str | None = None,
+    trusted_identity_headers: bool = False,
+    jwt_secret: str | None = None,
+    jwt_issuer: str | None = None,
+    jwt_audience: str | None = None,
+    oidc_jwks_url: str | None = None,
+    oidc_issuer: str | None = None,
+    oidc_audience: str | None = None,
+    oidc_jwks_fetcher: Callable[[str], dict[str, Any]] | None = None,
+    rate_limit: int = 120,
+    rate_window_seconds: int = 60,
+    hav_dev_api_key: str | None = None,
+    environment: str = "development",
+    allow_unauthenticated_dev: bool = False,
 ) -> APIRouter:
-    core = CoreV3Service(
+    core = service or CoreV3Service(
         data_dir=data_dir,
         backend=backend,
         signing_key=signing_key,
         receipt_signing_key=receipt_signing_key,
         postgres_dsn=postgres_dsn,
     )
-    service = PhiGraphHAVService(core)
-    router = APIRouter(prefix="/v3/hav", tags=["phigraph-hav"], dependencies=[Depends(require_hav_api_key)])
+    dev_key = hav_dev_api_key if hav_dev_api_key is not None else os.getenv("PHIGRAPH_HAV_API_KEY")
+    auth = build_core_auth_dependencies(
+        core,
+        api_key=api_key,
+        trusted_identity_headers=trusted_identity_headers,
+        jwt_secret=jwt_secret,
+        jwt_issuer=jwt_issuer,
+        jwt_audience=jwt_audience,
+        oidc_jwks_url=oidc_jwks_url,
+        oidc_issuer=oidc_issuer,
+        oidc_audience=oidc_audience,
+        oidc_jwks_fetcher=oidc_jwks_fetcher,
+        rate_limit=rate_limit,
+        rate_window_seconds=rate_window_seconds,
+        dev_api_key=dev_key,
+        environment=environment,
+        allow_unauthenticated_dev=allow_unauthenticated_dev,
+    )
+    hav_service = PhiGraphHAVService(core)
+    router = APIRouter(prefix="/v3/hav", tags=["phigraph-hav"])
 
-    @router.post("/verify")
-    def verify(request: HAVVerifyRequest) -> dict[str, Any]:
-        if request.state_available:
-            facts = [
-                EvidenceFact.create(
-                    source=item.source,
-                    subject=item.subject,
-                    predicate=item.predicate,
-                    value=item.value,
-                    confidence=item.confidence,
-                    scope=item.scope,
-                    metadata=item.metadata,
-                )
-                for item in request.evidence
-            ]
-            state = AuthoritativeState.create(
-                source_system=request.source_system,
-                evidence=facts,
-            )
-        else:
-            state = AuthoritativeState.unavailable(
-                source_system=request.source_system,
-                reason=request.unavailable_reason or "source unavailable",
-            )
-
-        result = service.verify_and_record(
-            candidate_output=request.candidate_output,
-            state=state,
-            issuer=request.issuer,
-            tenant_id=request.tenant_id,
-            project_id=request.project_id,
-        )
+    @router.get("/health")
+    def hav_health(identity=Depends(auth.require("read"))) -> dict[str, str]:
         return {
-            "receipt": result.signed_receipt,
-            "core": {
-                "claim_ids": list(result.core_claim_ids),
-                "evidence_ids": list(result.core_evidence_ids),
-                "action_id": result.core_action_id,
-                "policy_decision_id": result.core_policy_decision_id,
-            },
+            "status": "ok",
+            "component": "phigraph-hav",
+            "hav_version": HAV_VERSION,
+            "core_version": CORE_VERSION,
+            "protocol_version": PROTOCOL_VERSION,
+            "tenant_id": identity.tenant_id,
+            "project_id": identity.project_id,
         }
 
+    @router.post("/verify")
+    def verify(
+        request: HAVVerifyRequest,
+        idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
+        identity=Depends(auth.require("hav:verify")),
+    ) -> dict[str, Any]:
+        issuer = request.agent_id or identity.subject
+        payload = {
+            **request.model_dump(mode="json"),
+            "tenant_id": identity.tenant_id,
+            "project_id": identity.project_id,
+            "issuer": issuer,
+            "verifier_subject": identity.subject,
+            "scope": "hav.verify",
+        }
 
+        def operation() -> dict[str, Any]:
+            result = hav_service.verify_and_record(
+                candidate_output=request.candidate_output,
+                state=_build_state(request),
+                issuer=issuer,
+                tenant_id=identity.tenant_id,
+                project_id=identity.project_id,
+                verifier_subject=identity.subject,
+            )
+            return {
+                "receipt": result.signed_receipt,
+                "core": {
+                    "claim_ids": list(result.core_claim_ids),
+                    "evidence_ids": list(result.core_evidence_ids),
+                    "action_id": result.core_action_id,
+                    "policy_decision_id": result.core_policy_decision_id,
+                },
+            }
+
+        return auth.idempotent(idempotency_key, payload, operation)
 
     @router.post("/factual/extract")
-    def factual_extract(request: HAVFactualExtractRequest) -> dict[str, Any]:
+    def factual_extract(
+        request: HAVFactualExtractRequest,
+        identity=Depends(auth.require("read")),
+    ) -> dict[str, Any]:
         claims = FactualClaimExtractor().extract(request.text)
-        return {"claims": [item.__dict__ for item in claims]}
+        return {
+            "claims": [item.__dict__ for item in claims],
+            "tenant_id": identity.tenant_id,
+            "project_id": identity.project_id,
+        }
 
     @router.post("/consistency")
-    def consistency(request: HAVConsistencyRequest) -> dict[str, Any]:
+    def consistency(
+        request: HAVConsistencyRequest,
+        identity=Depends(auth.require("read")),
+    ) -> dict[str, Any]:
         result = MultiOutputConsistencyChecker().assess(request.outputs)
         return {
             "agreement_ratio": result.agreement_ratio,
             "shared_tokens": list(result.shared_tokens),
             "conflicting_status_terms": list(result.conflicting_status_terms),
             "note": result.note,
+            "tenant_id": identity.tenant_id,
+            "project_id": identity.project_id,
         }
 
     return router

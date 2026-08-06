@@ -6,10 +6,18 @@ from phigraph.hav.api import create_hav_router
 
 def test_hav_api_rejects_contradicted_global_claim(tmp_path):
     app = FastAPI()
-    app.include_router(create_hav_router(tmp_path, receipt_signing_key="api-test"))
+    app.include_router(
+        create_hav_router(
+            tmp_path,
+            receipt_signing_key="api-test",
+            allow_unauthenticated_dev=True,
+            trusted_identity_headers=True,
+        )
+    )
     client = TestClient(app)
+    headers = {"X-Role": "verifier"}
 
-    response = client.post("/v3/hav/verify", json={
+    response = client.post("/v3/hav/verify", headers=headers, json={
         "candidate_output": "Todos los controles pasaron.",
         "source_system": "github-actions",
         "evidence": [

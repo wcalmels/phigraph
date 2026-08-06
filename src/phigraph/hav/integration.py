@@ -25,12 +25,14 @@ from phigraph.core_v3.models import (
 )
 from phigraph.core_v3.service import CoreV3Service
 from phigraph.hav.engine import HAVEngine
+from phigraph.hav.governance import enrich_receipt, policy_hash
 from phigraph.hav.models import (
     AuthoritativeState,
     ClaimStatus,
     HAVReceipt,
     Verdict,
 )
+from phigraph.version import HAV_POLICY_ID, HAV_POLICY_VERSION, HAV_VERIFIER_ID
 
 
 @dataclass(frozen=True)
@@ -58,6 +60,7 @@ class PhiGraphHAVService:
         issuer: str = "ai-agent",
         tenant_id: str = "default",
         project_id: str = "default",
+        verifier_subject: str = HAV_VERIFIER_ID,
     ) -> PhiGraphHAVResult:
         receipt = self.engine.verify(candidate_output=candidate_output, state=state)
 
@@ -104,6 +107,7 @@ class PhiGraphHAVService:
                     "value": claim.value,
                     "critical": claim.critical,
                     "modality": claim.modality,
+                    "verifier_subject": verifier_subject,
                 },
             )
             registered_claim = self.core.ledger.register_claim(
@@ -123,7 +127,7 @@ class PhiGraphHAVService:
             )
             verification = CoreVerification.create(
                 claim_id=registered_claim.claim_id,
-                verifier="phigraph-hav-v0.1",
+                verifier=HAV_VERIFIER_ID,
                 method="structured_claim_verification",
                 result=self._map_claim_status(evaluation.status),
                 evidence_ids=mapped_evidence,
@@ -132,6 +136,8 @@ class PhiGraphHAVService:
                     "hav": True,
                     "hav_status": evaluation.status.value,
                     "hav_receipt_id": receipt.receipt_id,
+                    "verifier_subject": verifier_subject,
+                    "issuer": issuer,
                 },
             )
             self.core.ledger.record_verification(
@@ -143,11 +149,12 @@ class PhiGraphHAVService:
         action = ActionProposal.create(
             action_type="accept_ai_output",
             target=receipt.output_hash,
-            proposed_by="phigraph-hav-v0.1",
+            proposed_by=HAV_VERIFIER_ID,
             parameters={
                 "receipt_id": receipt.receipt_id,
                 "state_id": receipt.state_id,
                 "verdict": receipt.verdict.value,
+                "execution_authorized": False,
             },
             rationale_claim_ids=tuple(core_claim_ids),
             reversible=True,
@@ -158,8 +165,11 @@ class PhiGraphHAVService:
         policy_decision = CorePolicyDecision.create(
             action_id=action.action_id,
             effect=self._map_effect(receipt.verdict),
-            policy_ids=("PHIGRAPH_HAV_FAIL_CLOSED_V1",),
-            reasons=tuple(item["reason"] for item in receipt.policy_decisions),
+            policy_ids=(HAV_POLICY_ID,),
+            reasons=tuple(
+                item["reason"] for item in receipt.policy_decisions
+            )
+            + (f"policy_version={HAV_POLICY_VERSION}", f"policy_hash={policy_hash()}",),
             required_approvals=("human-reviewer",) if receipt.verdict == Verdict.HUMAN_REVIEW else (),
         )
         self.core.ledger.record_policy_decision(
@@ -168,7 +178,13 @@ class PhiGraphHAVService:
             project_id=project_id,
         )
 
-        receipt_payload = receipt.to_dict()
+        receipt_payload = enrich_receipt(
+            receipt.to_dict(),
+            tenant_id=tenant_id,
+            project_id=project_id,
+            issuer=issuer,
+            verifier_subject=verifier_subject,
+        )
         signed_receipt = (
             self.core.receipt_signer.sign(receipt_payload)
             if self.core.receipt_signer is not None
@@ -176,7 +192,7 @@ class PhiGraphHAVService:
         )
         receipt_evidence = CoreEvidence.create(
             kind="hav_verification_receipt",
-            source="phigraph-hav-v0.1",
+            source=HAV_VERIFIER_ID,
             status=EvidenceStatus.VALID,
             payload=signed_receipt,
             metadata={
@@ -184,6 +200,7 @@ class PhiGraphHAVService:
                 "receipt_id": receipt.receipt_id,
                 "verdict": receipt.verdict.value,
                 "output_hash": receipt.output_hash,
+                "policy_version": HAV_POLICY_VERSION,
             },
         )
         registered_receipt = self.core.ledger.register_evidence(

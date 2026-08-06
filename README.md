@@ -3,22 +3,23 @@
 [![CI](https://github.com/wcalmels/phigraph/actions/workflows/ci.yml/badge.svg)](https://github.com/wcalmels/phigraph/actions/workflows/ci.yml)
 [![Security](https://github.com/wcalmels/phigraph/actions/workflows/security.yml/badge.svg)](https://github.com/wcalmels/phigraph/actions/workflows/security.yml)
 [![Python](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/)
-[![Release](https://img.shields.io/badge/release-4.0.0-2ea44f.svg)](RELEASE_NOTES_V4.0.0.md)
+[![Release](https://img.shields.io/badge/release-4.1.0--rc.1-orange.svg)](RELEASE_NOTES_V4.1.0.md)
 [![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.21689514.svg)](https://doi.org/10.5281/zenodo.21689514)
 
-**TUCH PhiGraph Core 4.0.0** is a governed relational-intelligence platform for recording, verifying and controlling claims and actions produced by software agents and AI systems.
+**TUCH PhiGraph Core 4.1.0-rc.1** is a governed relational-intelligence platform for recording, verifying and controlling claims and actions produced by software agents and AI systems.
 
 > Model output is not verified truth. PhiGraph treats it as a candidate claim or action proposal until evidence, policy and verification establish otherwise.
 
 ## Status
 
-PhiGraph 4.0.0 is a stable technical MVP intended for local evaluation, controlled pilots and private deployments. It is **shadow-first**: the supplied runtime does not grant arbitrary external execution authority.
+PhiGraph **4.1.0-rc.1** (`development candidate`) extends Core 4.0 with canonical HAV v0.2 verification. It is **shadow-first**: the supplied runtime does not grant arbitrary external execution authority.
 
-- Core version: `4.0.0`
+- Core version: `4.1.0-rc.1`
+- HAV version: `0.2.0`
 - Protocol version: `2.0.0`
-- Automated tests: `117`
+- Automated tests: `146` (integration branch, this session)
 - Python: `3.10+`
-- Public namespaces: `phigraph.protocol`, `phigraph.core`, `phigraph.code`, `phigraph.sdk`
+- Public namespaces: `phigraph.protocol`, `phigraph.core`, `phigraph.hav`, `phigraph.code`, `phigraph.sdk`
 
 ## Architecture
 

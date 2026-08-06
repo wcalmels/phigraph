@@ -7,6 +7,8 @@ from datetime import datetime, timezone
 from enum import Enum
 from typing import Any
 
+from phigraph.version import HAV_VERSION
+
 
 def utc_now() -> str:
     return datetime.now(timezone.utc).isoformat()
@@ -126,7 +128,7 @@ class HAVReceipt:
     policy_decisions: tuple[dict[str, Any], ...]
     output_hash: str
     created_at: str = field(default_factory=utc_now)
-    version: str = "0.1.0"
+    version: str = HAV_VERSION
 
     @classmethod
     def create(

@@ -3,6 +3,7 @@ from phigraph.version import CORE_VERSION, PROTOCOL_LABEL
 
 from importlib.metadata import version
 from pathlib import Path
+import os
 
 import pandas as pd
 from fastapi import FastAPI, Header, HTTPException
@@ -152,7 +153,20 @@ def create_app(
     )
     app.include_router(create_general_platform_router())
     app.include_router(create_cyber_mvp_router())
-    app.include_router(create_core_v3_router(settings.data_dir))
-    app.include_router(create_hav_router(settings.data_dir))
+    app.include_router(create_core_v3_router(settings.data_dir, api_key=settings.api_key))
+    allow_unauthenticated_hav_dev = (
+        settings.environment in {"development", "test"}
+        and os.getenv("PHIGRAPH_HAV_ALLOW_UNAUTHENTICATED_DEV", "").strip().lower()
+        in {"1", "true", "yes", "on"}
+    )
+    app.include_router(
+        create_hav_router(
+            settings.data_dir,
+            api_key=settings.api_key,
+            environment=settings.environment,
+            allow_unauthenticated_dev=allow_unauthenticated_hav_dev,
+            receipt_signing_key=os.getenv("PHIGRAPH_RECEIPT_SIGNING_KEY"),
+        )
+    )
 
     return app

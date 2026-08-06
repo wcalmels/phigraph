@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from phigraph.hav.models import ClaimEvaluation, ClaimStatus, Verdict
+from phigraph.version import HAV_POLICY_ID
 
 
 @dataclass(frozen=True)
@@ -15,7 +16,7 @@ class HAVPolicyDecision:
 
 
 class FailClosedHAVPolicy:
-    policy_id = "PHIGRAPH_HAV_FAIL_CLOSED_V1"
+    policy_id = HAV_POLICY_ID
 
     def decide(self, *, state_available: bool, evaluations: list[ClaimEvaluation]) -> HAVPolicyDecision:
         if not state_available:
