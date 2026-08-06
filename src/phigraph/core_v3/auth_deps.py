@@ -83,7 +83,12 @@ def build_core_auth_dependencies(
                 if validator is None:
                     metrics.inc("auth.denied")
                     raise HTTPException(status_code=503, detail="core_auth_misconfigured")
-                return validator.principal(authorization.split(None, 1)[1], x_tenant_id, x_project_id)
+                return validator.principal(
+                    authorization.split(None, 1)[1],
+                    x_tenant_id if trusted_identity_headers else None,
+                    x_project_id if trusted_identity_headers else None,
+                    allow_header_fallback=trusted_identity_headers,
+                )
             except ValueError as exc:
                 metrics.inc("auth.denied")
                 raise HTTPException(status_code=401, detail=str(exc)) from exc

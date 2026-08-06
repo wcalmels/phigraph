@@ -19,20 +19,23 @@ PhiGraph 4.1.0-rc.1 standardizes on Core identity for all `/v3/*` endpoints incl
 
 HAV `/v3/hav/verify` **shall not** accept `tenant_id` or `project_id` in the request body. Scope is derived exclusively from the authenticated `Principal`:
 
-- `tenant_id` ← `X-Tenant-ID` header (or JWT/OIDC claims when token auth is used)
-- `project_id` ← `X-Project-ID` header
-- `subject` ← `X-Subject` header or token `sub`
-- `issuer` for claims ← `agent_id` body field if present, else `identity.subject`
-- `verifier_subject` ← always `identity.subject` (recorded in metadata; must not equal issuer spoof)
+- `tenant_id` ← JWT/OIDC `tenant_id` claim (required when Bearer auth is used unless `trusted_identity_headers=True`)
+- `project_id` ← JWT/OIDC `project_id` claim (same rule)
+- With `trusted_identity_headers=True` behind an explicit trusted proxy, missing claims may fall back to `X-Tenant-ID` / `X-Project-ID`
+- With API key and `trusted_identity_headers=False`, scope comes from server-side `ApiKeyIdentity`
+- `subject` ← token `sub` or trusted headers / server-side identity
+- `issuer` for claims ← `agent_id` body field (declared, not authenticated)
+- `verifier_subject` ← authenticated `identity.subject`
+- Basic guard: when declared `agent_id == verifier_subject`, return HTTP 403 (not a universal anti-self-verify policy; strong segregation pending authenticated provenance / GRDI)
 
 ### Authentication modes
 
 | Mode | When | Scope source |
 |------|------|--------------|
-| Core API key | `api_key` configured on router | Headers after key validation |
-| JWT/OIDC | Bearer token configured | Token claims + header fallback |
-| HAV dev key | No Core auth; `PHIGRAPH_HAV_API_KEY` set | Headers (role reset to admin if untrusted) |
-| Open dev | No auth configured | Headers ignored; default admin principal |
+| Core API key | `api_key` configured on router | Server-side `ApiKeyIdentity`, or headers when `trusted_identity_headers=True` |
+| JWT/OIDC | Bearer token configured | Required `tenant_id` / `project_id` claims; header fallback only when `trusted_identity_headers=True` |
+| HAV dev key | No Core auth; `PHIGRAPH_HAV_API_KEY` set | Server-side dev identity, or headers when trusted |
+| Open dev | `allow_unauthenticated_dev=True` | Server-side dev identity, or headers when trusted |
 
 ### RBAC
 

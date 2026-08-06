@@ -36,7 +36,12 @@ class HAVVerifyRequest(BaseModel):
     evidence: list[HAVEvidenceRequest] = Field(default_factory=list)
     agent_id: str | None = Field(
         default=None,
-        description="Optional agent identifier recorded as claim issuer; must not equal the verifier identity.",
+        description=(
+            "Declared (non-authenticated) agent identifier recorded as claim issuer. "
+            "When it equals the authenticated verifier subject, a basic self-verification "
+            "guard returns 403; strong issuer/verifier segregation requires authenticated "
+            "provenance (GRDI, pending)."
+        ),
     )
 
 

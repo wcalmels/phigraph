@@ -6,6 +6,7 @@ import base64
 import hashlib
 import hmac
 import json
+import time
 from concurrent.futures import ThreadPoolExecutor
 
 import pytest
@@ -14,6 +15,7 @@ from fastapi.testclient import TestClient
 
 from phigraph.core_v3.api import create_core_v3_router
 from phigraph.core_v3.api_key_identity import ApiKeyIdentity
+from phigraph.core_v3.auth import principal_from_claims
 from phigraph.core_v3.security import Role
 from phigraph.core_v3.service import CoreV3Service
 from phigraph.deployment.app import create_app
@@ -121,7 +123,7 @@ def test_jwt_configured_requires_authorization_header(tmp_path):
     assert response.json()["detail"] == "authorization_required"
 
 
-def test_invalid_bearer_token_rejected(tmp_path):
+def _jwt_router(tmp_path):
     app = FastAPI()
     app.include_router(
         create_core_v3_router(
@@ -131,9 +133,98 @@ def test_invalid_bearer_token_rejected(tmp_path):
             jwt_audience="phi",
         )
     )
-    client = TestClient(app)
+    return TestClient(app)
+
+
+def _scoped_jwt_payload(**overrides) -> dict:
+    payload = {
+        "sub": "alice",
+        "role": "viewer",
+        "iss": "issuer",
+        "aud": "phi",
+        "exp": int(time.time()) + 60,
+        "tenant_id": "token-tenant",
+        "project_id": "token-project",
+    }
+    payload.update(overrides)
+    return payload
+
+
+def test_invalid_bearer_token_rejected(tmp_path):
+    client = _jwt_router(tmp_path)
     response = client.get("/v3/status", headers={"Authorization": "Bearer not-a-valid-token"})
     assert response.status_code == 401
+
+
+def test_jwt_missing_tenant_id_claim_rejected(tmp_path):
+    client = _jwt_router(tmp_path)
+    payload = _scoped_jwt_payload()
+    del payload["tenant_id"]
+    token = _jwt("secret", payload)
+    response = client.get("/v3/status", headers={"Authorization": f"Bearer {token}"})
+    assert response.status_code == 401
+    assert response.json()["detail"] == "missing_tenant_id_claim"
+
+
+def test_jwt_missing_project_id_claim_rejected(tmp_path):
+    client = _jwt_router(tmp_path)
+    payload = _scoped_jwt_payload()
+    del payload["project_id"]
+    token = _jwt("secret", payload)
+    response = client.get("/v3/status", headers={"Authorization": f"Bearer {token}"})
+    assert response.status_code == 401
+    assert response.json()["detail"] == "missing_project_id_claim"
+
+
+def test_jwt_ignores_spoofed_tenant_headers_when_claims_present(tmp_path):
+    client = _jwt_router(tmp_path)
+    token = _jwt("secret", _scoped_jwt_payload())
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "X-Tenant-ID": "spoofed-tenant",
+        "X-Project-ID": "spoofed-project",
+    }
+    response = client.get("/v3/status", headers=headers)
+    assert response.status_code == 200
+    scope = response.json()["scope"]
+    assert scope["tenant_id"] == "token-tenant"
+    assert scope["project_id"] == "token-project"
+
+
+def test_jwt_with_full_scope_claims_accepted(tmp_path):
+    client = _jwt_router(tmp_path)
+    token = _jwt("secret", _scoped_jwt_payload(tenant_id="accepted-tenant", project_id="accepted-project"))
+    response = client.get("/v3/status", headers={"Authorization": f"Bearer {token}"})
+    assert response.status_code == 200
+    scope = response.json()["scope"]
+    assert scope["tenant_id"] == "accepted-tenant"
+    assert scope["project_id"] == "accepted-project"
+
+
+def test_principal_from_claims_oidc_contract_matches_jwt():
+    claims = {
+        "sub": "service-account",
+        "role": "verifier",
+        "iss": "https://issuer.example",
+        "tenant_id": "oidc-tenant",
+        "project_id": "oidc-project",
+    }
+    principal = principal_from_claims(claims, allow_header_fallback=False)
+    assert principal.subject == "service-account"
+    assert principal.tenant_id == "oidc-tenant"
+    assert principal.project_id == "oidc-project"
+
+    with pytest.raises(ValueError, match="missing_project_id_claim"):
+        principal_from_claims({"sub": "x", "tenant_id": "t"}, allow_header_fallback=False)
+
+    fallback = principal_from_claims(
+        {"sub": "proxy-user", "role": "admin"},
+        tenant_id="header-tenant",
+        project_id="header-project",
+        allow_header_fallback=True,
+    )
+    assert fallback.tenant_id == "header-tenant"
+    assert fallback.project_id == "header-project"
 
 
 def test_untrusted_headers_ignored_without_trusted_flag(tmp_path):

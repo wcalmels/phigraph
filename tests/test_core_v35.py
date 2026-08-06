@@ -25,7 +25,20 @@ def test_oidc_jwks_validation_and_cache():
     calls = []
     cache = JWKSCache(fetcher=lambda url: calls.append(url) or jwks)
     validator = OIDCValidator("https://issuer/jwks", "https://issuer", "phi", cache=cache)
-    token = jwt.encode({"sub": "alice", "role": "viewer", "iss": "https://issuer", "aud": "phi", "exp": int(time.time()) + 60}, private, algorithm="RS256", headers={"kid": "k1"})
+    token = jwt.encode(
+        {
+            "sub": "alice",
+            "role": "viewer",
+            "iss": "https://issuer",
+            "aud": "phi",
+            "exp": int(time.time()) + 60,
+            "tenant_id": "t1",
+            "project_id": "p1",
+        },
+        private,
+        algorithm="RS256",
+        headers={"kid": "k1"},
+    )
     assert validator.principal(token, "t", "p").subject == "alice"
     validator.validate(token)
     assert len(calls) == 1
@@ -64,7 +77,20 @@ def test_api_oidc_trace_and_signed_sandbox(tmp_path):
     private = rsa.generate_private_key(public_exponent=65537, key_size=2048)
     numbers = private.public_key().public_numbers()
     jwks = {"keys": [{"kty": "RSA", "kid": "k1", "alg": "RS256", "use": "sig", "n": _b64int(numbers.n), "e": _b64int(numbers.e)}]}
-    token = jwt.encode({"sub": "alice", "role": "admin", "iss": "https://issuer", "aud": "phi", "exp": int(time.time()) + 60}, private, algorithm="RS256", headers={"kid": "k1"})
+    token = jwt.encode(
+        {
+            "sub": "alice",
+            "role": "admin",
+            "iss": "https://issuer",
+            "aud": "phi",
+            "exp": int(time.time()) + 60,
+            "tenant_id": "t1",
+            "project_id": "p1",
+        },
+        private,
+        algorithm="RS256",
+        headers={"kid": "k1"},
+    )
     app = FastAPI()
     app.include_router(create_core_v3_router(tmp_path, oidc_jwks_url="https://issuer/jwks", oidc_issuer="https://issuer", oidc_audience="phi", oidc_jwks_fetcher=lambda _: jwks, receipt_signing_key="receipt-key"))
     client = TestClient(app)
