@@ -50,7 +50,7 @@ New JWT/OIDC scope coverage: 5 tests in `tests/test_hav_auth_adversarial.py`.
 
 | Tool | Command | Result |
 |------|---------|--------|
-| Pytest | `py -3 -m pytest -q` | **169 passed**, 0 failed, 0 skipped |
+| Pytest | `py -3 -m pytest -q` | **168 passed**, 0 failed, 0 skipped |
 | Compile | `py -3 -m compileall -q src tests` | **PASSED** (exit 0) |
 | Ruff (integration scope) | `ruff check src/phigraph/hav src/phigraph/core_v3/auth.py src/phigraph/core_v3/auth_deps.py src/phigraph/core_v3/api_key_identity.py src/phigraph/core_v3/idempotency.py src/phigraph/deployment/core_service.py tests/test_hav_*` | **0 errors** |
 | Bandit (focal) | `bandit -r src/phigraph/hav src/phigraph/core_v3/auth.py src/phigraph/core_v3/auth_deps.py src/phigraph/deployment/core_service.py -q` | **No issues identified** |
