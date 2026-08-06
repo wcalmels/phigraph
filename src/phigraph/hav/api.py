@@ -4,10 +4,12 @@ import os
 from pathlib import Path
 from typing import Any, Callable
 
-from fastapi import APIRouter, Depends, Header
+from fastapi import APIRouter, Depends, Header, HTTPException
 from pydantic import BaseModel, Field
 
+from phigraph.core_v3.api_key_identity import ApiKeyIdentity
 from phigraph.core_v3.auth_deps import build_core_auth_dependencies
+from phigraph.core_v3.security import Role
 from phigraph.core_v3.service import CoreV3Service
 from phigraph.hav.extraction.factual import FactualClaimExtractor
 from phigraph.hav.integration import PhiGraphHAVService
@@ -72,7 +74,7 @@ def _build_state(request: HAVVerifyRequest) -> AuthoritativeState:
 
 
 def create_hav_router(
-    data_dir: str | Path,
+    data_dir: str | Path | None = None,
     *,
     service: CoreV3Service | None = None,
     backend: str = "json",
@@ -93,15 +95,25 @@ def create_hav_router(
     hav_dev_api_key: str | None = None,
     environment: str = "development",
     allow_unauthenticated_dev: bool = False,
+    api_key_identity: ApiKeyIdentity | None = None,
+    require_receipt_signing_key: bool = False,
 ) -> APIRouter:
-    core = service or CoreV3Service(
-        data_dir=data_dir,
-        backend=backend,
-        signing_key=signing_key,
-        receipt_signing_key=receipt_signing_key,
-        postgres_dsn=postgres_dsn,
-    )
+    if require_receipt_signing_key and not receipt_signing_key:
+        raise ValueError("PHIGRAPH_RECEIPT_SIGNING_KEY is required for this environment")
+    if service is None:
+        if data_dir is None:
+            raise ValueError("data_dir or service is required")
+        core = CoreV3Service(
+            data_dir=data_dir,
+            backend=backend,
+            signing_key=signing_key,
+            receipt_signing_key=receipt_signing_key,
+            postgres_dsn=postgres_dsn,
+        )
+    else:
+        core = service
     dev_key = hav_dev_api_key if hav_dev_api_key is not None else os.getenv("PHIGRAPH_HAV_API_KEY")
+    hav_api_identity = api_key_identity or ApiKeyIdentity(role=Role.VERIFIER)
     auth = build_core_auth_dependencies(
         core,
         api_key=api_key,
@@ -118,6 +130,7 @@ def create_hav_router(
         dev_api_key=dev_key,
         environment=environment,
         allow_unauthenticated_dev=allow_unauthenticated_dev,
+        api_key_identity=hav_api_identity,
     )
     hav_service = PhiGraphHAVService(core)
     router = APIRouter(prefix="/v3/hav", tags=["phigraph-hav"])
@@ -140,7 +153,11 @@ def create_hav_router(
         idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
         identity=Depends(auth.require("hav:verify")),
     ) -> dict[str, Any]:
-        issuer = request.agent_id or identity.subject
+        if request.agent_id is None:
+            raise HTTPException(status_code=422, detail="agent_id_required")
+        if request.agent_id == identity.subject:
+            raise HTTPException(status_code=403, detail="self_verification_forbidden")
+        issuer = request.agent_id
         payload = {
             **request.model_dump(mode="json"),
             "tenant_id": identity.tenant_id,
@@ -169,7 +186,14 @@ def create_hav_router(
                 },
             }
 
-        return auth.idempotent(idempotency_key, payload, operation)
+        return auth.idempotent(
+            idempotency_key,
+            payload,
+            operation,
+            operation_name="hav.verify",
+            tenant_id=identity.tenant_id,
+            project_id=identity.project_id,
+        )
 
     @router.post("/factual/extract")
     def factual_extract(

@@ -17,9 +17,10 @@ def test_hav_api_rejects_contradicted_global_claim(tmp_path):
     client = TestClient(app)
     headers = {"X-Role": "verifier"}
 
-    response = client.post("/v3/hav/verify", headers=headers, json={
+    response = client.post("/v3/hav/verify", headers=headers,         json={
         "candidate_output": "Todos los controles pasaron.",
         "source_system": "github-actions",
+        "agent_id": "external-agent",
         "evidence": [
             {
                 "source": "github-actions",

@@ -104,7 +104,7 @@ def test_v39_api_corpus_and_security(tmp_path: Path):
     from phigraph.core_v3.api import create_core_v3_router
     (tmp_path / "app.py").write_text('password = "super-secret-password"\n')
     app = FastAPI()
-    app.include_router(create_core_v3_router(tmp_path / "data"))
+    app.include_router(create_core_v3_router(tmp_path / "data", allow_unauthenticated_dev=True))
     client = TestClient(app)
     corpus = client.post("/v3/code/corpus/validate", json={"tasks": [{"id": "T1", "title": "x", "prompt": "y", "repository": "r", "commit_sha": "abcdef1"}]})
     scan = client.post("/v3/code/security/scan", json={"repository_path": str(tmp_path)})

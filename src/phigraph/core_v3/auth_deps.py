@@ -5,7 +5,9 @@ from typing import Any, Callable
 
 from fastapi import Depends, Header, HTTPException
 
+from .api_key_identity import ApiKeyIdentity, DevIdentity
 from .auth import JWKSCache, JWTValidator, OIDCValidator
+from .idempotency import IdempotencyStore
 from .metrics import CoreMetrics
 from .rate_limit import SlidingWindowRateLimiter
 from .security import Principal, Role
@@ -38,6 +40,8 @@ def build_core_auth_dependencies(
     dev_api_key: str | None = None,
     environment: str = "development",
     allow_unauthenticated_dev: bool = False,
+    api_key_identity: ApiKeyIdentity | None = None,
+    dev_identity: DevIdentity | None = None,
 ) -> CoreAuthDependencies:
     metrics = CoreMetrics()
     jwt_validator = JWTValidator(jwt_secret, jwt_issuer, jwt_audience) if jwt_secret else None
@@ -52,10 +56,10 @@ def build_core_auth_dependencies(
         else None
     )
     limiter = SlidingWindowRateLimiter(rate_limit, rate_window_seconds)
-    core_auth_configured = any(
-        value is not None
-        for value in (api_key, jwt_secret, oidc_jwks_url)
-    )
+    bearer_auth_configured = jwt_validator is not None or oidc_validator is not None
+    api_key_identity = api_key_identity or ApiKeyIdentity()
+    dev_identity = dev_identity or DevIdentity()
+    core_auth_configured = bearer_auth_configured or api_key is not None
 
     def principal(
         x_tenant_id: str = Header(default="default"),
@@ -68,42 +72,58 @@ def build_core_auth_dependencies(
     ) -> Principal:
         if environment in {"production", "staging"} and not core_auth_configured:
             metrics.inc("auth.denied")
-            raise HTTPException(status_code=503, detail="hav_core_auth_required")
-        if not core_auth_configured and not allow_unauthenticated_dev:
-            if dev_api_key is None:
+            raise HTTPException(status_code=503, detail="core_auth_required")
+
+        if bearer_auth_configured:
+            if not authorization or not authorization.lower().startswith("bearer "):
                 metrics.inc("auth.denied")
-                raise HTTPException(status_code=401, detail="authentication_required")
-            if x_api_key != dev_api_key:
-                metrics.inc("auth.denied")
-                raise HTTPException(status_code=401, detail="invalid_hav_dev_api_key")
-        if (oidc_validator is not None or jwt_validator is not None) and authorization:
-            if not authorization.lower().startswith("bearer "):
-                raise HTTPException(status_code=401, detail="invalid_authorization_header")
+                raise HTTPException(status_code=401, detail="authorization_required")
             try:
                 validator = oidc_validator or jwt_validator
-                assert validator is not None
+                if validator is None:
+                    metrics.inc("auth.denied")
+                    raise HTTPException(status_code=503, detail="core_auth_misconfigured")
                 return validator.principal(authorization.split(None, 1)[1], x_tenant_id, x_project_id)
             except ValueError as exc:
                 metrics.inc("auth.denied")
                 raise HTTPException(status_code=401, detail=str(exc)) from exc
-        if api_key is not None and x_api_key != api_key:
-            metrics.inc("auth.denied")
-            raise HTTPException(status_code=401, detail="invalid_api_key")
-        if (
-            not core_auth_configured
-            and allow_unauthenticated_dev
-            and dev_api_key is not None
-            and x_api_key != dev_api_key
-        ):
+
+        if api_key is not None:
+            if x_api_key != api_key:
+                metrics.inc("auth.denied")
+                raise HTTPException(status_code=401, detail="invalid_api_key")
+            if trusted_identity_headers:
+                try:
+                    role = Role(x_role)
+                except ValueError as exc:
+                    raise HTTPException(status_code=403, detail="invalid_role") from exc
+                return Principal(x_subject, role, x_tenant_id, x_project_id, x_issuer)
+            return api_key_identity.to_principal()
+
+        if dev_api_key is not None and x_api_key == dev_api_key:
+            if trusted_identity_headers:
+                try:
+                    role = Role(x_role)
+                except ValueError as exc:
+                    raise HTTPException(status_code=403, detail="invalid_role") from exc
+                return Principal(x_subject, role, x_tenant_id, x_project_id, x_issuer)
+            return dev_identity.to_principal()
+
+        if allow_unauthenticated_dev:
+            if trusted_identity_headers:
+                try:
+                    role = Role(x_role)
+                except ValueError as exc:
+                    raise HTTPException(status_code=403, detail="invalid_role") from exc
+                return Principal(x_subject, role, x_tenant_id, x_project_id, x_issuer)
+            return dev_identity.to_principal()
+
+        if dev_api_key is not None and x_api_key is not None:
             metrics.inc("auth.denied")
             raise HTTPException(status_code=401, detail="invalid_hav_dev_api_key")
-        if not trusted_identity_headers and not core_auth_configured and not allow_unauthenticated_dev:
-            x_subject, x_role, x_issuer = "api-client", "admin", "api-key"
-        try:
-            role = Role(x_role)
-        except ValueError as exc:
-            raise HTTPException(status_code=403, detail="invalid_role") from exc
-        return Principal(x_subject, role, x_tenant_id, x_project_id, x_issuer)
+
+        metrics.inc("auth.denied")
+        raise HTTPException(status_code=401, detail="authentication_required")
 
     def enforce_rate(identity: Principal = Depends(principal)) -> Principal:
         allowed, remaining, retry_after = limiter.check(f"{identity.tenant_id}:{identity.subject}")
@@ -125,21 +145,29 @@ def build_core_auth_dependencies(
 
         return dependency
 
-    def idempotent(key: str | None, payload: dict[str, Any], operation: Callable[[], dict[str, Any]]) -> dict[str, Any]:
-        if not key:
+    def idempotent(
+        external_key: str | None,
+        payload: dict[str, Any],
+        operation: Callable[[], dict[str, Any]],
+        *,
+        operation_name: str,
+        tenant_id: str,
+        project_id: str,
+    ) -> dict[str, Any]:
+        if not external_key:
             return operation()
+        scoped = IdempotencyStore.scoped_key(
+            operation_name=operation_name,
+            tenant_id=tenant_id,
+            project_id=project_id,
+            external_key=external_key,
+        )
         digest = service.idempotency.request_hash(payload)
         try:
-            existing = service.idempotency.get(key, digest)
+            return service.idempotency.run(scoped, digest, operation)
         except ValueError as exc:
             metrics.inc("idempotency.conflict")
             raise HTTPException(status_code=409, detail=str(exc)) from exc
-        if existing is not None:
-            metrics.inc("idempotency.hit")
-            return existing
-        response = operation()
-        service.idempotency.put(key, digest, response)
-        return response
 
     return CoreAuthDependencies(
         service=service,

@@ -30,7 +30,7 @@ def test_api_accepts_bearer_and_enforces_rbac(tmp_path):
 
 
 def test_sandbox_endpoint_is_dry_run(tmp_path):
-    app=FastAPI(); app.include_router(create_core_v3_router(tmp_path))
+    app=FastAPI(); app.include_router(create_core_v3_router(tmp_path, allow_unauthenticated_dev=True))
     client=TestClient(app)
     r=client.post('/v3/runtime/sandbox',json={'action_type':'create_ticket','target':'case-1','approvals':['alice','bob']})
     assert r.status_code==200
@@ -43,7 +43,7 @@ def test_trace_recorder_and_endpoint(tmp_path):
     with recorder.span('unit', key='value'):
         pass
     assert recorder.snapshot()[0]['status']=='ok'
-    app=FastAPI(); app.include_router(create_core_v3_router(tmp_path))
+    app=FastAPI(); app.include_router(create_core_v3_router(tmp_path, allow_unauthenticated_dev=True))
     client=TestClient(app)
     client.post('/v3/runtime/run',json={})
     response=client.get('/v3/traces')

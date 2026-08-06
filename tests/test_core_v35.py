@@ -52,7 +52,7 @@ def test_signed_receipt_detects_tampering():
 
 def test_rate_limiter_blocks_excess_requests(tmp_path):
     app = FastAPI()
-    app.include_router(create_core_v3_router(tmp_path, rate_limit=2, rate_window_seconds=60))
+    app.include_router(create_core_v3_router(tmp_path, rate_limit=2, rate_window_seconds=60, allow_unauthenticated_dev=True))
     client = TestClient(app)
     assert client.get("/v3/status").status_code == 200
     assert client.get("/v3/status").status_code == 200

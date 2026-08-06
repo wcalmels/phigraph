@@ -47,6 +47,7 @@ def _verify_payload(**overrides) -> dict:
     base = {
         "candidate_output": "Todos los controles pasaron.",
         "source_system": "github-actions",
+        "agent_id": "external-agent",
         "evidence": [
             {
                 "source": "github-actions",
@@ -176,6 +177,7 @@ def test_source_unavailable_verdict_blocks(tmp_path):
     payload = {
         "candidate_output": "All checks passed.",
         "source_system": "github-actions",
+        "agent_id": "external-agent",
         "state_available": False,
         "unavailable_reason": "upstream API timeout",
     }
@@ -208,6 +210,7 @@ def test_human_review_on_critical_unknown(tmp_path):
     payload = {
         "candidate_output": "CodeQL status: passed",
         "source_system": "github-actions",
+        "agent_id": "external-agent",
         "evidence": [
             {
                 "source": "github-actions",
@@ -412,7 +415,7 @@ def test_staging_without_core_auth_fails_closed(tmp_path):
     )
     response = client.post("/v3/hav/verify", json=_verify_payload(), headers=_auth_headers())
     assert response.status_code == 503
-    assert response.json()["detail"] == "hav_core_auth_required"
+    assert response.json()["detail"] == "core_auth_required"
 
 
 def test_development_requires_explicit_unauthenticated_opt_in(tmp_path):
@@ -427,7 +430,8 @@ def test_development_requires_explicit_unauthenticated_opt_in(tmp_path):
     assert response.json()["detail"] == "authentication_required"
 
 
-def test_deployment_staging_hav_closed_without_core_auth(tmp_path):
+def test_deployment_staging_hav_closed_without_core_auth(tmp_path, monkeypatch):
+    monkeypatch.setenv("PHIGRAPH_RECEIPT_SIGNING_KEY", "staging-sign-key")
     settings = DeploymentSettings(
         environment="staging",
         data_dir=str(tmp_path),
@@ -442,4 +446,4 @@ def test_deployment_staging_hav_closed_without_core_auth(tmp_path):
     client = TestClient(create_app(settings))
     response = client.post("/v3/hav/verify", json=_verify_payload(), headers=_auth_headers())
     assert response.status_code == 503
-    assert response.json()["detail"] == "hav_core_auth_required"
+    assert response.json()["detail"] == "core_auth_required"

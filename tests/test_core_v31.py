@@ -40,7 +40,7 @@ def test_service_mirrors_shadow_and_policy(tmp_path):
 
 def test_v3_api_claim_evidence_verification_and_runtime(tmp_path):
     app = FastAPI()
-    app.include_router(create_core_v3_router(tmp_path))
+    app.include_router(create_core_v3_router(tmp_path, allow_unauthenticated_dev=True))
     client = TestClient(app)
 
     status = client.get("/v3/status")

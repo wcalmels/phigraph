@@ -22,7 +22,10 @@ from .platform_app import create_platform_router
 from .general_platform_app import create_general_platform_router
 from phigraph.cyber_mvp.api import create_cyber_mvp_router
 from phigraph.core_v3.api import create_core_v3_router
+from phigraph.core_v3.service import CoreV3Service
 from phigraph.hav.api import create_hav_router
+
+from .core_service import build_core_service, require_receipt_signing_key
 
 
 def _package_version() -> str:
@@ -153,19 +156,29 @@ def create_app(
     )
     app.include_router(create_general_platform_router())
     app.include_router(create_cyber_mvp_router())
-    app.include_router(create_core_v3_router(settings.data_dir, api_key=settings.api_key))
+    core_service = build_core_service(settings)
+    receipt_signing_key = require_receipt_signing_key(settings)
     allow_unauthenticated_hav_dev = (
         settings.environment in {"development", "test"}
         and os.getenv("PHIGRAPH_HAV_ALLOW_UNAUTHENTICATED_DEV", "").strip().lower()
         in {"1", "true", "yes", "on"}
     )
     app.include_router(
+        create_core_v3_router(
+            service=core_service,
+            api_key=settings.api_key,
+            receipt_signing_key=receipt_signing_key,
+            allow_unauthenticated_dev=allow_unauthenticated_hav_dev,
+        )
+    )
+    app.include_router(
         create_hav_router(
-            settings.data_dir,
+            service=core_service,
             api_key=settings.api_key,
             environment=settings.environment,
             allow_unauthenticated_dev=allow_unauthenticated_hav_dev,
-            receipt_signing_key=os.getenv("PHIGRAPH_RECEIPT_SIGNING_KEY"),
+            receipt_signing_key=receipt_signing_key,
+            require_receipt_signing_key=settings.environment in {"staging", "production"},
         )
     )
 
