@@ -1,8 +1,8 @@
 # ADR-015 — Core Identity for HAV
 
-**Status:** accepted  
-**Date:** 2026-08-06  
-**Branch:** `integration/v4.1-grdi-foundation`  
+**Status:** accepted
+**Date:** 2026-08-06
+**Branch:** `integration/v4.1-grdi-foundation`
 **Related:** ADR-014
 
 ## Context
@@ -61,7 +61,7 @@ payload = {
     **request.model_dump(mode="json"),
     "tenant_id": identity.tenant_id,
     "project_id": identity.project_id,
-    "issuer": request.agent_id or identity.subject,
+    "issuer": request.agent_id,
     "verifier_subject": identity.subject,
     "scope": "hav.verify",
 }

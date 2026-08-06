@@ -1,8 +1,8 @@
 # Análisis de integración — PhiGraph Core 4.1.0-rc.1 + HAV v0.2
 
-**Fecha:** 2026-08-06  
-**Rama:** `integration/v4.1-grdi-foundation`  
-**Base:** `main@74d15e2`  
+**Fecha:** 2026-08-06
+**Rama:** `integration/v4.1-grdi-foundation`
+**Base:** `main@74d15e2`
 **Estado:** cambios locales listos para revisión (sin commit ni push en el momento del empaquetado)
 
 ---

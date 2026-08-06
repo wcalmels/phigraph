@@ -1,7 +1,7 @@
 # HAV Protocol v1
 
-**Protocol version:** 2.0.0 (PhiGraph Core)  
-**HAV version:** 0.2.0  
+**Protocol version:** 2.0.0 (PhiGraph Core)
+**HAV version:** 0.2.0
 **Status:** canonical integration (development candidate)
 
 ## Overview
@@ -54,8 +54,8 @@ When `state_available` is `false`, the engine produces `SOURCE_UNAVAILABLE` with
 
 ## Verify request
 
-**Endpoint:** `POST /v3/hav/verify`  
-**Permission:** `hav:verify`  
+**Endpoint:** `POST /v3/hav/verify`
+**Permission:** `hav:verify`
 **Idempotent:** yes (`Idempotency-Key` header)
 
 ### Headers (required for production)
@@ -132,21 +132,21 @@ When `state_available` is `false`, the engine produces `SOURCE_UNAVAILABLE` with
 
 ### Factual extract
 
-**Endpoint:** `POST /v3/hav/factual/extract`  
+**Endpoint:** `POST /v3/hav/factual/extract`
 **Permission:** `read`
 
 Extracts factual claim candidates (percentages, counts) from free text. Does not verify against authoritative state.
 
 ### Consistency check
 
-**Endpoint:** `POST /v3/hav/consistency`  
+**Endpoint:** `POST /v3/hav/consistency`
 **Permission:** `read`
 
 Computes token agreement ratio across multiple model outputs. **Auxiliary signal only** — not treated as authoritative truth.
 
 ### Health
 
-**Endpoint:** `GET /v3/hav/health`  
+**Endpoint:** `GET /v3/hav/health`
 **Permission:** none
 
 Returns component status and version alignment.
@@ -155,8 +155,8 @@ Returns component status and version alignment.
 
 Clients may verify receipt integrity via Core:
 
-**Endpoint:** `POST /v3/receipts/verify`  
-**Body:** signed receipt JSON  
+**Endpoint:** `POST /v3/receipts/verify`
+**Body:** signed receipt JSON
 **Response:** `{"valid": true|false}`
 
 Tampering with any signed field (including nested governance) invalidates the signature.

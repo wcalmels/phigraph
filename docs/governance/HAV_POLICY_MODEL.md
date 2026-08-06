@@ -1,7 +1,7 @@
 # HAV Policy Model
 
-**Policy ID:** `PHIGRAPH_HAV_FAIL_CLOSED_V1`  
-**Policy version:** `1.0.0`  
+**Policy ID:** `PHIGRAPH_HAV_FAIL_CLOSED_V1`
+**Policy version:** `1.0.0`
 **Implementation:** `phigraph.hav.policy.FailClosedHAVPolicy`
 
 ## Purpose
@@ -32,39 +32,39 @@ state_available?
 
 ### R1 — Source unavailable
 
-**Condition:** `AuthoritativeState.available == false`  
-**Verdict:** `SOURCE_UNAVAILABLE`  
-**Reason:** "Authoritative state is unavailable; verification is blocked."  
+**Condition:** `AuthoritativeState.available == false`
+**Verdict:** `SOURCE_UNAVAILABLE`
+**Reason:** "Authoritative state is unavailable; verification is blocked."
 **Core effect:** BLOCK
 
 ### R2 — Critical contradiction
 
-**Condition:** Any claim with `critical=true` and status `CONTRADICTED`  
-**Verdict:** `REJECT`  
-**Reason:** "A critical claim contradicts authoritative evidence."  
-**Metadata:** `claim_ids` of contradicted critical claims  
+**Condition:** Any claim with `critical=true` and status `CONTRADICTED`
+**Verdict:** `REJECT`
+**Reason:** "A critical claim contradicts authoritative evidence."
+**Metadata:** `claim_ids` of contradicted critical claims
 **Core effect:** BLOCK
 
 ### R3 — Critical unknown
 
-**Condition:** Any claim with `critical=true` and status `UNSUPPORTED` or `INSUFFICIENT_EVIDENCE`  
-**Verdict:** `HUMAN_REVIEW`  
-**Reason:** "A critical claim lacks sufficient evidence."  
-**Metadata:** `claim_ids` of unknown critical claims  
+**Condition:** Any claim with `critical=true` and status `UNSUPPORTED` or `INSUFFICIENT_EVIDENCE`
+**Verdict:** `HUMAN_REVIEW`
+**Reason:** "A critical claim lacks sufficient evidence."
+**Metadata:** `claim_ids` of unknown critical claims
 **Core effect:** REQUIRE_APPROVAL
 
 ### R4 — Non-critical gaps
 
-**Condition:** Any claim with status ≠ `SUPPORTED` (and R2/R3 not triggered)  
-**Verdict:** `WARN`  
-**Reason:** "No critical contradiction was found, but some claims are not supported."  
+**Condition:** Any claim with status ≠ `SUPPORTED` (and R2/R3 not triggered)
+**Verdict:** `WARN`
+**Reason:** "No critical contradiction was found, but some claims are not supported."
 **Core effect:** WARN
 
 ### R5 — All supported
 
-**Condition:** All claims `SUPPORTED`  
-**Verdict:** `PASS`  
-**Reason:** "All extracted claims are supported."  
+**Condition:** All claims `SUPPORTED`
+**Verdict:** `PASS`
+**Reason:** "All extracted claims are supported."
 **Core effect:** ALLOW (non-executing)
 
 ## Critical claim definition

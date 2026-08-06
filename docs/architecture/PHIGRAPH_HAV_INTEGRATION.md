@@ -1,7 +1,7 @@
 # PhiGraph HAV Integration Architecture
 
-**Version:** Core 4.1.0-rc.1 / HAV 0.2.0 / Protocol 2.0.0  
-**Status:** development candidate  
+**Version:** Core 4.1.0-rc.1 / HAV 0.2.0 / Protocol 2.0.0
+**Status:** development candidate
 **Branch:** `integration/v4.1-grdi-foundation`
 
 ## Purpose

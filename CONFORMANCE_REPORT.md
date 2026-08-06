@@ -1,7 +1,7 @@
 # Conformance Report — HAV Canonical Integration
 
-**Branch:** `integration/v4.1-grdi-foundation`  
-**Base:** `main@74d15e2`  
+**Branch:** `integration/v4.1-grdi-foundation`
+**Base:** `main@74d15e2`
 **Review date:** 2026-08-06 (JWT/OIDC scope hardening)
 
 ## Requirements matrix

@@ -1,8 +1,8 @@
 # ADR-014 — Canonical HAV Integration
 
-**Status:** accepted  
-**Date:** 2026-08-06  
-**Branch:** `integration/v4.1-grdi-foundation`  
+**Status:** accepted
+**Date:** 2026-08-06
+**Branch:** `integration/v4.1-grdi-foundation`
 **Deciders:** PhiGraph Core team
 
 ## Context

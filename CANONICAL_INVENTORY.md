@@ -1,8 +1,8 @@
 # PhiGraph Canonical Inventory — v4.1.0-rc.1
 
-**Branch:** `integration/v4.1-grdi-foundation`  
-**Base:** `main@74d15e2`  
-**HAV commits:** `1f23491`, `c7bf335` (cherry-picked)  
+**Branch:** `integration/v4.1-grdi-foundation`
+**Base:** `main@74d15e2`
+**HAV commits:** `1f23491`, `c7bf335` (cherry-picked)
 **Date:** 2026-08-06
 
 ## Version matrix

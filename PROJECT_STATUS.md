@@ -1,7 +1,7 @@
 # PhiGraph Project Status
 
-**Last updated:** 2026-08-06  
-**Branch:** `integration/v4.1-grdi-foundation`  
+**Last updated:** 2026-08-06
+**Branch:** `integration/v4.1-grdi-foundation`
 **Release target:** 4.1.0-rc.1 → 4.1.0 stable
 
 ## Executive summary

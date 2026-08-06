@@ -1,7 +1,7 @@
 # Release Notes — PhiGraph 4.1.0-rc.1
 
-**Release date:** 2026-08-06  
-**Status:** development candidate  
+**Release date:** 2026-08-06
+**Status:** development candidate
 **Branch:** `integration/v4.1-grdi-foundation`
 
 ## Overview
