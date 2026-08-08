@@ -14,7 +14,7 @@ class Role(str, Enum):
 _PERMISSIONS = {
     Role.VIEWER: frozenset({"read"}),
     Role.OPERATOR: frozenset(
-        {"read", "claim:create", "evidence:create", "runtime:run", "grdi:create"}
+        {"read", "claim:create", "evidence:create", "runtime:run", "grdi:create", "grdi:plan"}
     ),
     Role.VERIFIER: frozenset(
         {
@@ -26,6 +26,8 @@ _PERMISSIONS = {
             "runtime:run",
             "grdi:create",
             "grdi:authorize",
+            "grdi:plan",
+            "grdi:simulate",
         }
     ),
     Role.ADMIN: frozenset({"*"}),

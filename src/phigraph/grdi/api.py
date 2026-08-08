@@ -32,6 +32,14 @@ class AuthorizationRequest(BaseModel):
     rationale: str = ""
 
 
+class ExecutionPlanRequest(BaseModel):
+    envelope_id: str = Field(min_length=1)
+    authority_decision_id: str = Field(min_length=1)
+    requested_action: dict[str, Any]
+    expected_effects: list[str] = Field(default_factory=list)
+    rollback_strategy: dict[str, Any] = Field(default_factory=dict)
+
+
 def create_grdi_router(
     *,
     service: CoreV3Service,
@@ -62,7 +70,7 @@ def create_grdi_router(
             "protocol_version": PROTOCOL_VERSION,
             "tenant_id": identity.tenant_id,
             "project_id": identity.project_id,
-            "execution_gateway": "not_implemented",
+            "execution_gateway": "shadow_v0.1",
         }
 
     @router.post("/envelopes", status_code=201)
@@ -166,6 +174,89 @@ def create_grdi_router(
             payload,
             operation,
             operation_name="grdi.envelope.authorize",
+            tenant_id=identity.tenant_id,
+            project_id=identity.project_id,
+        )
+
+    @router.post("/execution-plans", status_code=201)
+    def create_execution_plan(
+        body: ExecutionPlanRequest,
+        idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
+        identity=Depends(auth.require("grdi:plan")),
+    ) -> dict[str, Any]:
+        payload = {
+            **body.model_dump(mode="json"),
+            "tenant_id": identity.tenant_id,
+            "project_id": identity.project_id,
+            "requested_by": identity.subject,
+        }
+
+        def operation() -> dict[str, Any]:
+            try:
+                return grdi.create_execution_plan(
+                    envelope_id=body.envelope_id,
+                    authority_decision_id=body.authority_decision_id,
+                    tenant_id=identity.tenant_id,
+                    project_id=identity.project_id,
+                    requested_by=identity.subject,
+                    requested_action=body.requested_action,
+                    expected_effects=tuple(body.expected_effects),
+                    rollback_strategy=body.rollback_strategy,
+                )
+            except KeyError as exc:
+                raise HTTPException(status_code=404, detail=str(exc)) from exc
+            except ValueError as exc:
+                raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+        return auth.idempotent(
+            idempotency_key,
+            payload,
+            operation,
+            operation_name="grdi.execution_plan.create",
+            tenant_id=identity.tenant_id,
+            project_id=identity.project_id,
+        )
+
+    @router.get("/execution-plans/{plan_id}")
+    def get_execution_plan(plan_id: str, identity=Depends(auth.require("read"))) -> dict[str, Any]:
+        try:
+            return grdi.get_execution_plan(
+                plan_id,
+                tenant_id=identity.tenant_id,
+                project_id=identity.project_id,
+            )
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    @router.post("/execution-plans/{plan_id}/simulate", status_code=201)
+    def simulate_execution_plan(
+        plan_id: str,
+        idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
+        identity=Depends(auth.require("grdi:simulate")),
+    ) -> dict[str, Any]:
+        payload = {
+            "plan_id": plan_id,
+            "tenant_id": identity.tenant_id,
+            "project_id": identity.project_id,
+        }
+
+        def operation() -> dict[str, Any]:
+            try:
+                return grdi.simulate_execution_plan(
+                    plan_id,
+                    tenant_id=identity.tenant_id,
+                    project_id=identity.project_id,
+                )
+            except KeyError as exc:
+                raise HTTPException(status_code=404, detail=str(exc)) from exc
+            except ValueError as exc:
+                raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+        return auth.idempotent(
+            idempotency_key,
+            payload,
+            operation,
+            operation_name="grdi.execution_plan.simulate",
             tenant_id=identity.tenant_id,
             project_id=identity.project_id,
         )

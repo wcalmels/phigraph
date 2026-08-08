@@ -139,9 +139,91 @@ def test_api_high_risk_requires_explicit_approval(tmp_path):
     assert approved.json()["authorization_state"] == "AUTHORIZED"
 
 
-def test_openapi_exposes_only_foundation_routes(tmp_path):
+def test_api_execution_plan_shadow_flow(tmp_path):
+    client, core = _client(tmp_path)
+    created = client.post(
+        "/v4/grdi/envelopes",
+        json=_payload(core),
+        headers=_headers("release-agent", "operator"),
+    ).json()
+    authorized = client.post(
+        f"/v4/grdi/envelopes/{created['envelope_id']}/authorize",
+        json={},
+        headers=_headers("human-verifier", "verifier"),
+    ).json()
+    plan = client.post(
+        "/v4/grdi/execution-plans",
+        json={
+            "envelope_id": created["envelope_id"],
+            "authority_decision_id": authorized["authority_decision_id"],
+            "requested_action": created["proposed_action"],
+            "expected_effects": ["staging promotion recorded"],
+            "rollback_strategy": {"type": "revert_release"},
+        },
+        headers={**_headers("release-agent", "operator"), "Idempotency-Key": "plan-once"},
+    )
+    assert plan.status_code == 201
+    body = plan.json()
+    assert body["gateway_decision"]["eligibility"] == "ELIGIBLE_FOR_SHADOW"
+    assert body["flow_state"]["execution"] == "NOT_EXECUTED"
+
+    replay = client.post(
+        "/v4/grdi/execution-plans",
+        json={
+            "envelope_id": created["envelope_id"],
+            "authority_decision_id": authorized["authority_decision_id"],
+            "requested_action": created["proposed_action"],
+            "expected_effects": ["staging promotion recorded"],
+            "rollback_strategy": {"type": "revert_release"},
+        },
+        headers={**_headers("release-agent", "operator"), "Idempotency-Key": "plan-once"},
+    )
+    assert replay.json()["plan_id"] == body["plan_id"]
+
+    simulated = client.post(
+        f"/v4/grdi/execution-plans/{body['plan_id']}/simulate",
+        headers={**_headers("human-verifier", "verifier"), "Idempotency-Key": "simulate-once"},
+    )
+    assert simulated.status_code == 201
+    receipt = simulated.json()["shadow_receipt"]
+    assert receipt["executed"] is False
+    assert receipt["connector_invoked"] is False
+    assert core.receipt_signer.verify(receipt["normalized_plan"])
+
+    health = client.get("/v4/grdi/health", headers=_headers("viewer", "viewer"))
+    assert health.json()["execution_gateway"] == "shadow_v0.1"
+
+
+def test_api_execution_plan_blocks_tampered_action(tmp_path):
+    client, core = _client(tmp_path)
+    created = client.post(
+        "/v4/grdi/envelopes",
+        json=_payload(core),
+        headers=_headers("release-agent", "operator"),
+    ).json()
+    authorized = client.post(
+        f"/v4/grdi/envelopes/{created['envelope_id']}/authorize",
+        json={},
+        headers=_headers("human-verifier", "verifier"),
+    ).json()
+    tampered = client.post(
+        "/v4/grdi/execution-plans",
+        json={
+            "envelope_id": created["envelope_id"],
+            "authority_decision_id": authorized["authority_decision_id"],
+            "requested_action": {"type": "promote", "target": "production"},
+        },
+        headers=_headers("release-agent", "operator"),
+    )
+    assert tampered.status_code == 201
+    assert tampered.json()["gateway_decision"]["eligibility"] == "BLOCKED"
+
+
+def test_openapi_exposes_grdi_routes_without_real_execution(tmp_path):
     client, _ = _client(tmp_path)
     paths = client.get("/openapi.json").json()["paths"]
     assert "/v4/grdi/envelopes" in paths
     assert "/v4/grdi/envelopes/{envelope_id}/authorize" in paths
-    assert not any("execute" in path for path in paths)
+    assert "/v4/grdi/execution-plans" in paths
+    assert "/v4/grdi/execution-plans/{plan_id}/simulate" in paths
+    assert not any(path.endswith("/execute") for path in paths)

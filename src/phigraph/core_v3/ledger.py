@@ -32,6 +32,9 @@ class EvidenceLedger:
         "outcomes",
         "decision_envelopes",
         "authority_decisions",
+        "execution_requests",
+        "gateway_decisions",
+        "shadow_execution_receipts",
     )
 
     def __init__(self, path: str | Path | None = None, *, backend: LedgerBackend | None = None,
@@ -203,11 +206,51 @@ class EvidenceLedger:
         project_id: str,
     ) -> dict[str, Any]:
         """Append a protocol extension record with canonical tenant scope."""
-        if collection not in {"decision_envelopes", "authority_decisions"}:
+        allowed = {
+            "decision_envelopes",
+            "authority_decisions",
+            "execution_requests",
+            "gateway_decisions",
+            "shadow_execution_receipts",
+        }
+        if collection not in allowed:
             raise ValueError(f"Unsupported scoped extension collection: {collection}")
         scoped = {**row, "scope": {"tenant_id": tenant_id, "project_id": project_id}}
         self._append(collection, scoped, unique_key=unique_key)
         return scoped
+
+    def update_scoped_record(
+        self,
+        collection: str,
+        row: dict[str, Any],
+        *,
+        unique_key: str,
+        tenant_id: str,
+        project_id: str,
+    ) -> dict[str, Any]:
+        """Replace an existing scoped extension record and rebuild its collection chain."""
+        allowed = {
+            "decision_envelopes",
+            "authority_decisions",
+            "execution_requests",
+            "gateway_decisions",
+            "shadow_execution_receipts",
+        }
+        if collection not in allowed:
+            raise ValueError(f"Unsupported scoped extension collection: {collection}")
+        with self._lock:
+            payload = self._read()
+            for index, existing in enumerate(payload[collection]):
+                if existing[unique_key] != row[unique_key]:
+                    continue
+                scope = existing.get("scope", {})
+                if scope.get("tenant_id") != tenant_id or scope.get("project_id") != project_id:
+                    raise KeyError(f"scoped_record_not_found:{row[unique_key]}")
+                scoped = {**row, "scope": scope}
+                payload[collection][index] = scoped
+                self._write(self._rechain_payload(payload))
+                return scoped
+        raise KeyError(f"scoped_record_not_found:{row[unique_key]}")
 
     def get_record(self, collection: str, record_id: str, id_key: str) -> dict[str, Any]:
         row = next((item for item in self._read()[collection] if item[id_key] == record_id), None)
