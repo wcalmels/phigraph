@@ -40,12 +40,12 @@ def test_service_mirrors_shadow_and_policy(tmp_path):
 
 def test_v3_api_claim_evidence_verification_and_runtime(tmp_path):
     app = FastAPI()
-    app.include_router(create_core_v3_router(tmp_path))
+    app.include_router(create_core_v3_router(tmp_path, allow_unauthenticated_dev=True))
     client = TestClient(app)
 
     status = client.get("/v3/status")
     assert status.status_code == 200
-    assert status.json()["version"] == "4.0.0"
+    assert status.json()["version"] == "4.1.0-rc.1"
 
     claim = client.post("/v3/claims", json={
         "statement": "tests passed",

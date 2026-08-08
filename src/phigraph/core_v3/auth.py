@@ -50,11 +50,46 @@ class JWTValidator:
             raise ValueError("invalid_jwt_audience")
         return payload
 
-    def principal(self, token: str, tenant_id: str, project_id: str) -> Principal:
-        return principal_from_claims(self.validate(token), tenant_id, project_id)
+    def principal(
+        self,
+        token: str,
+        tenant_id: str | None = None,
+        project_id: str | None = None,
+        *,
+        allow_header_fallback: bool = False,
+    ) -> Principal:
+        return principal_from_claims(
+            self.validate(token),
+            tenant_id=tenant_id,
+            project_id=project_id,
+            allow_header_fallback=allow_header_fallback,
+        )
 
 
-def principal_from_claims(claims: dict[str, Any], tenant_id: str, project_id: str) -> Principal:
+def principal_from_claims(
+    claims: dict[str, Any],
+    *,
+    tenant_id: str | None = None,
+    project_id: str | None = None,
+    allow_header_fallback: bool = False,
+) -> Principal:
+    claim_tenant = claims.get("tenant_id")
+    claim_project = claims.get("project_id")
+
+    if allow_header_fallback:
+        resolved_tenant = claim_tenant if claim_tenant not in (None, "") else tenant_id
+        resolved_project = claim_project if claim_project not in (None, "") else project_id
+    else:
+        if claim_tenant in (None, ""):
+            raise ValueError("missing_tenant_id_claim")
+        if claim_project in (None, ""):
+            raise ValueError("missing_project_id_claim")
+        resolved_tenant = str(claim_tenant)
+        resolved_project = str(claim_project)
+
+    if not resolved_tenant or not resolved_project:
+        raise ValueError("missing_scope_claim")
+
     try:
         role = Role(claims.get("role", "viewer"))
     except ValueError as exc:
@@ -62,8 +97,8 @@ def principal_from_claims(claims: dict[str, Any], tenant_id: str, project_id: st
     return Principal(
         str(claims.get("sub", "unknown")),
         role,
-        str(claims.get("tenant_id", tenant_id)),
-        str(claims.get("project_id", project_id)),
+        str(resolved_tenant),
+        str(resolved_project),
         str(claims.get("iss", "jwt")),
     )
 
@@ -151,5 +186,17 @@ class OIDCValidator:
     def validate(self, token: str) -> dict[str, Any]:
         return self._decode(token)
 
-    def principal(self, token: str, tenant_id: str, project_id: str) -> Principal:
-        return principal_from_claims(self.validate(token), tenant_id, project_id)
+    def principal(
+        self,
+        token: str,
+        tenant_id: str | None = None,
+        project_id: str | None = None,
+        *,
+        allow_header_fallback: bool = False,
+    ) -> Principal:
+        return principal_from_claims(
+            self.validate(token),
+            tenant_id=tenant_id,
+            project_id=project_id,
+            allow_header_fallback=allow_header_fallback,
+        )

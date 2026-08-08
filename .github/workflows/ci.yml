@@ -1,4 +1,4 @@
-﻿name: CI
+name: CI
 
 on:
   push:
@@ -9,12 +9,18 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
   test:
     name: test / Python ${{ matrix.python-version }}
     runs-on: ubuntu-latest
+    timeout-minutes: 45
     strategy:
       fail-fast: false
+      max-parallel: 2
       matrix:
         python-version: ["3.10", "3.11", "3.12", "3.13"]
     steps:
@@ -35,11 +41,13 @@ jobs:
         run: python -m compileall -q src tests
       - name: Verify safe defaults
         run: |
-          PHIGRAPH_SHADOW_ONLY=true PHIGRAPH_REAL_CONNECTORS_ENABLED=false           python -c "from phigraph.deployment import load_settings; s=load_settings(); assert s.shadow_only and not s.real_connectors_enabled"
+          PHIGRAPH_SHADOW_ONLY=true PHIGRAPH_REAL_CONNECTORS_ENABLED=false \
+          python -c "from phigraph.deployment import load_settings; s=load_settings(); assert s.shadow_only and not s.real_connectors_enabled"
 
   package:
     runs-on: ubuntu-latest
     needs: test
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -56,7 +64,7 @@ jobs:
           WHEEL_PATH=$(find dist -maxdepth 1 -name "*.whl" -print -quit)
           test -n "$WHEEL_PATH"
           /tmp/phigraph-wheel-test/bin/pip install "${WHEEL_PATH}[api,benchmark,auth,app]"
-          /tmp/phigraph-wheel-test/bin/python -c "import phigraph; from phigraph.version import CORE_VERSION; assert CORE_VERSION == '4.0.0'"
+          /tmp/phigraph-wheel-test/bin/python -c "from importlib.metadata import version; from packaging.version import Version; import phigraph; from phigraph.version import CORE_VERSION; assert Version(CORE_VERSION) == Version(version('phigraph-causal'))"
       - uses: actions/upload-artifact@v4
         with:
           name: phigraph-distributions
@@ -65,10 +73,8 @@ jobs:
   docker:
     runs-on: ubuntu-latest
     needs: test
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       - name: Build image
         run: docker build --tag phigraph:${{ github.sha }} .
-
-
-

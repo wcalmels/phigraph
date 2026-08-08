@@ -37,7 +37,7 @@ def test_api_idempotency_scope_and_auth(tmp_path):
 
 def test_idempotency_conflict(tmp_path):
     app = FastAPI()
-    app.include_router(create_core_v3_router(tmp_path))
+    app.include_router(create_core_v3_router(tmp_path, allow_unauthenticated_dev=True))
     client = TestClient(app)
     headers = {"idempotency-key": "same"}
     a = {"statement": "a", "claim_type": "status", "subject": "repo", "issuer": "agent"}

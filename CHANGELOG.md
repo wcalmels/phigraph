@@ -1,5 +1,15 @@
 # Changelog
 
+## 4.1.0-rc.1 - 2026-08-06 (development candidate)
+
+- Integrated HAV v0.2 as canonical verification component (`phigraph.hav`).
+- Added `/v3/hav/verify`, `/v3/hav/factual/extract`, `/v3/hav/consistency` to deployment app.
+- Reused Core authentication, RBAC (`hav:verify`), rate limits and idempotency for HAV.
+- Removed tenant/project from public HAV verify body; scope comes from authenticated identity.
+- Centralized version constants (`HAV_VERSION`, policy IDs, verifier ID).
+- Added governance-enriched signed receipts with GRDI boundary metadata.
+- Added canonical integration tests (146 total passing in integration session).
+
 ## 3.6.0 - 2026-07-27
 
 - Added PhiGraph Code repository indexer and deterministic symbol inventory.

@@ -8,13 +8,11 @@ from fastapi import APIRouter, Depends, Header, HTTPException, Query, Response
 from pydantic import BaseModel, Field
 
 from .adapters import AgentProposal, StaticAgentAdapter
-from .metrics import CoreMetrics
-from .models import Claim, ClaimStatus, Evidence, EvidenceStatus, RuntimeMode, Verification
-from .security import Principal, Role
-from .auth import JWTValidator, OIDCValidator, JWKSCache
-from .models import ActionProposal
+from .api_key_identity import ApiKeyIdentity
+from .auth_deps import build_core_auth_dependencies
+from .models import ActionProposal, Claim, ClaimStatus, Evidence, EvidenceStatus, RuntimeMode, Verification
+from .security import Principal
 from .service import CoreV3Service
-from .rate_limit import SlidingWindowRateLimiter
 from .telemetry import TraceContext
 from .code_benchmark import AgentReport, PhiGraphCodeBenchmark, RepositoryIndexer, ModelRun, MultiModelBenchmarkSuite, save_benchmark_report
 from .github_readonly import GitHubReadOnlyConnector
@@ -135,8 +133,9 @@ class RuntimeRequest(BaseModel):
 
 
 def create_core_v3_router(
-    data_dir: str | Path,
+    data_dir: str | Path | None = None,
     *,
+    service: CoreV3Service | None = None,
     backend: str = "json",
     api_key: str | None = None,
     signing_key: str | None = None,
@@ -154,75 +153,76 @@ def create_core_v3_router(
     otlp_endpoint: str | None = None,
     rate_limit: int = 120,
     rate_window_seconds: int = 60,
+    allow_unauthenticated_dev: bool = False,
+    api_key_identity: ApiKeyIdentity | None = None,
 ) -> APIRouter:
-    service = CoreV3Service(data_dir=data_dir, backend=backend, signing_key=signing_key, postgres_dsn=postgres_dsn, receipt_signing_key=receipt_signing_key, sandbox_isolated=sandbox_isolated, otlp_endpoint=otlp_endpoint)
-    metrics = CoreMetrics()
+    if service is None:
+        if data_dir is None:
+            raise ValueError("data_dir or service is required")
+        service = CoreV3Service(
+            data_dir=data_dir,
+            backend=backend,
+            signing_key=signing_key,
+            postgres_dsn=postgres_dsn,
+            receipt_signing_key=receipt_signing_key,
+            sandbox_isolated=sandbox_isolated,
+            otlp_endpoint=otlp_endpoint,
+        )
+    auth = build_core_auth_dependencies(
+        service,
+        api_key=api_key,
+        trusted_identity_headers=trusted_identity_headers,
+        jwt_secret=jwt_secret,
+        jwt_issuer=jwt_issuer,
+        jwt_audience=jwt_audience,
+        oidc_jwks_url=oidc_jwks_url,
+        oidc_issuer=oidc_issuer,
+        oidc_audience=oidc_audience,
+        oidc_jwks_fetcher=oidc_jwks_fetcher,
+        rate_limit=rate_limit,
+        rate_window_seconds=rate_window_seconds,
+        allow_unauthenticated_dev=allow_unauthenticated_dev,
+        api_key_identity=api_key_identity,
+    )
+    metrics = auth.metrics
+    require = auth.require
     router = APIRouter(prefix="/v3", tags=["core-v3"])
-    jwt_validator = JWTValidator(jwt_secret, jwt_issuer, jwt_audience) if jwt_secret else None
-    oidc_validator = OIDCValidator(oidc_jwks_url, oidc_issuer, oidc_audience, cache=JWKSCache(fetcher=oidc_jwks_fetcher)) if oidc_jwks_url and oidc_issuer and oidc_audience else None
-    limiter = SlidingWindowRateLimiter(rate_limit, rate_window_seconds)
 
-    def principal(
-        x_tenant_id: str = Header(default="default"),
-        x_project_id: str = Header(default="default"),
-        x_api_key: str | None = Header(default=None),
-        x_subject: str = Header(default="api-client"),
-        x_role: str = Header(default="admin"),
-        x_issuer: str = Header(default="api-key"),
-        authorization: str | None = Header(default=None),
-    ) -> Principal:
-        if (oidc_validator is not None or jwt_validator is not None) and authorization:
-            if not authorization.lower().startswith("bearer "):
-                raise HTTPException(status_code=401, detail="invalid_authorization_header")
+    def scoped_idempotent(
+        key: str | None,
+        payload: dict[str, Any],
+        operation,
+        *,
+        identity: Principal,
+        operation_name: str,
+    ) -> dict[str, Any]:
+        if key:
+            scoped = auth.service.idempotency.scoped_key(
+                operation_name=operation_name,
+                tenant_id=identity.tenant_id,
+                project_id=identity.project_id,
+                external_key=key,
+            )
+            digest = auth.service.idempotency.request_hash(payload)
             try:
-                validator = oidc_validator or jwt_validator
-                assert validator is not None
-                return validator.principal(authorization.split(None, 1)[1], x_tenant_id, x_project_id)
+                cached = auth.service.idempotency.get(scoped, digest)
             except ValueError as exc:
-                metrics.inc("auth.denied")
-                raise HTTPException(status_code=401, detail=str(exc)) from exc
-        if api_key is not None and x_api_key != api_key:
-            metrics.inc("auth.denied")
-            raise HTTPException(status_code=401, detail="invalid_api_key")
-        if not trusted_identity_headers:
-            x_subject, x_role, x_issuer = "api-client", "admin", "api-key"
+                metrics.inc("idempotency.conflict")
+                raise HTTPException(status_code=409, detail=str(exc)) from exc
+            if cached is not None:
+                metrics.inc("idempotency.hit")
+                return cached
         try:
-            role = Role(x_role)
-        except ValueError as exc:
-            raise HTTPException(status_code=403, detail="invalid_role") from exc
-        return Principal(x_subject, role, x_tenant_id, x_project_id, x_issuer)
-
-
-    def enforce_rate(identity: Principal = Depends(principal)) -> Principal:
-        allowed, remaining, retry_after = limiter.check(f"{identity.tenant_id}:{identity.subject}")
-        if not allowed:
-            metrics.inc("rate_limit.denied")
-            raise HTTPException(status_code=429, detail="rate_limit_exceeded", headers={"Retry-After": str(retry_after), "X-RateLimit-Remaining": "0"})
-        return identity
-
-    def require(permission: str) -> Callable[[Principal], Principal]:
-        def dependency(value: Principal = Depends(enforce_rate)) -> Principal:
-            if not value.allows(permission):
-                metrics.inc("rbac.denied")
-                raise HTTPException(status_code=403, detail=f"missing_permission:{permission}")
-            return value
-        return dependency
-
-    def idempotent(key: str | None, payload: dict[str, Any], operation) -> dict[str, Any]:
-        if not key:
-            return operation()
-        digest = service.idempotency.request_hash(payload)
-        try:
-            existing = service.idempotency.get(key, digest)
-        except ValueError as exc:
-            metrics.inc("idempotency.conflict")
-            raise HTTPException(status_code=409, detail=str(exc)) from exc
-        if existing is not None:
-            metrics.inc("idempotency.hit")
-            return existing
-        response = operation()
-        service.idempotency.put(key, digest, response)
-        return response
+            return auth.idempotent(
+                key,
+                payload,
+                operation,
+                operation_name=operation_name,
+                tenant_id=identity.tenant_id,
+                project_id=identity.project_id,
+            )
+        except HTTPException:
+            raise
 
     @router.get("/health/live")
     def liveness() -> dict[str, Any]:
@@ -257,7 +257,13 @@ def create_core_v3_router(
     @router.post("/claims", status_code=201)
     def create_claim(body: ClaimRequest, idempotency_key: str | None = Header(default=None), identity: Principal = Depends(require("claim:create"))) -> dict[str, Any]:
         payload = {**body.model_dump(), "tenant_id": identity.tenant_id, "project_id": identity.project_id, "op": "claim"}
-        result = idempotent(idempotency_key, payload, lambda: service.ledger.register_claim(Claim.create(**body.model_dump()), tenant_id=identity.tenant_id, project_id=identity.project_id).to_dict())
+        result = scoped_idempotent(
+            idempotency_key,
+            payload,
+            lambda: service.ledger.register_claim(Claim.create(**body.model_dump()), tenant_id=identity.tenant_id, project_id=identity.project_id).to_dict(),
+            identity=identity,
+            operation_name="core.claim.create",
+        )
         metrics.inc("claims.created")
         return result
 
@@ -275,7 +281,13 @@ def create_core_v3_router(
     @router.post("/evidence", status_code=201)
     def create_evidence(body: EvidenceRequest, idempotency_key: str | None = Header(default=None), identity: Principal = Depends(require("evidence:create"))) -> dict[str, Any]:
         payload = {**body.model_dump(mode="json"), "tenant_id": identity.tenant_id, "project_id": identity.project_id, "op": "evidence"}
-        result = idempotent(idempotency_key, payload, lambda: service.ledger.register_evidence(Evidence.create(**body.model_dump()), tenant_id=identity.tenant_id, project_id=identity.project_id).to_dict())
+        result = scoped_idempotent(
+            idempotency_key,
+            payload,
+            lambda: service.ledger.register_evidence(Evidence.create(**body.model_dump()), tenant_id=identity.tenant_id, project_id=identity.project_id).to_dict(),
+            identity=identity,
+            operation_name="core.evidence.create",
+        )
         metrics.inc("evidence.created")
         return result
 
@@ -296,7 +308,13 @@ def create_core_v3_router(
             except KeyError as exc:
                 raise HTTPException(status_code=404, detail=str(exc)) from exc
             return verification.to_dict()
-        result = idempotent(idempotency_key, {**body.model_dump(mode="json"), "tenant_id": identity.tenant_id, "project_id": identity.project_id}, operation)
+        result = scoped_idempotent(
+            idempotency_key,
+            {**body.model_dump(mode="json"), "tenant_id": identity.tenant_id, "project_id": identity.project_id},
+            operation,
+            identity=identity,
+            operation_name="core.verification.create",
+        )
         metrics.inc("verifications.created")
         return result
 
@@ -310,7 +328,13 @@ def create_core_v3_router(
                 raise HTTPException(status_code=400, detail=str(exc)) from exc
             with service.telemetry.use_context(incoming):
                 return service.run(adapter=adapter, request=body.request, context=body.context, mode=body.mode, approvals=tuple(body.approvals), executor=None, tenant_id=identity.tenant_id, project_id=identity.project_id).to_dict()
-        result = idempotent(idempotency_key, {**body.model_dump(mode="json"), "tenant_id": identity.tenant_id, "project_id": identity.project_id}, operation)
+        result = scoped_idempotent(
+            idempotency_key,
+            {**body.model_dump(mode="json"), "tenant_id": identity.tenant_id, "project_id": identity.project_id},
+            operation,
+            identity=identity,
+            operation_name="core.runtime.run",
+        )
         metrics.inc("runtime.runs")
         return result
 

@@ -1,5 +1,13 @@
 # PhiGraph Roadmap
 
+## In progress: v4.1 — GRDI Foundation (development candidate)
+
+- **Done (integration branch):** canonical HAV v0.2, Core identity for HAV, idempotent `/v3/hav/verify`, versioned policy receipts
+- **Next:** Decision Envelope, Authority Engine boundary, Execution Gateway stub, Outcome Ledger stub
+- **Not started:** full GRDI runtime, production 4.1.0 stable release
+
+See `PROJECT_STATUS.md`, `docs/architecture/PHIGRAPH_HAV_INTEGRATION.md`, ADR-014/015.
+
 ## Completed: Core v3.5
 
 Federated OIDC/JWKS identity, W3C tracing, OTLP-ready export, signed receipts, rate limiting, RLS scope hooks and process-isolated dry-run sandbox.

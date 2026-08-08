@@ -41,9 +41,9 @@ def test_rbac_and_oidc_ready_headers(tmp_path):
 
 def test_health_metrics_and_integrity_endpoints(tmp_path):
     app = FastAPI()
-    app.include_router(create_core_v3_router(tmp_path))
+    app.include_router(create_core_v3_router(tmp_path, allow_unauthenticated_dev=True))
     client = TestClient(app)
-    assert client.get("/v3/health/live").json()["version"] == "4.0.0"
+    assert client.get("/v3/health/live").json()["version"] == "4.1.0-rc.1"
     assert client.get("/v3/health/ready").status_code == 200
     assert client.get("/v3/ledger/integrity").json()["valid"] is True
     client.get("/v3/status")

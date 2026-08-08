@@ -60,7 +60,7 @@ def test_code_benchmark_api(tmp_path: Path):
     (tmp_path / "tests" / "test_ok.py").write_text("def test_ok():\n    assert True\n", encoding="utf-8")
     data = tmp_path / "data"
     app = FastAPI()
-    app.include_router(create_core_v3_router(data))
+    app.include_router(create_core_v3_router(data, allow_unauthenticated_dev=True))
     response = TestClient(app).post("/v3/code/benchmark", json={
         "repository_path": str(tmp_path),
         "agent": "small-model",
