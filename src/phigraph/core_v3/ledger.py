@@ -1,21 +1,38 @@
 from __future__ import annotations
 
+import hashlib
+import hmac
+import json
 from dataclasses import replace
 from pathlib import Path
 from threading import RLock
 from typing import Any
-import hashlib
-import hmac
-import json
 
 from .backends import JsonLedgerBackend, LedgerBackend
-from .models import Claim, ClaimStatus, Evidence, Verification, ActionProposal, PolicyDecision, Outcome
+from .models import (
+    ActionProposal,
+    Claim,
+    ClaimStatus,
+    Evidence,
+    Outcome,
+    PolicyDecision,
+    Verification,
+)
 
 
 class EvidenceLedger:
     """Backend-neutral ledger with scoped queries and optional HMAC evidence signatures."""
 
-    COLLECTIONS = ("claims", "evidence", "verifications", "actions", "policy_decisions", "outcomes")
+    COLLECTIONS = (
+        "claims",
+        "evidence",
+        "verifications",
+        "actions",
+        "policy_decisions",
+        "outcomes",
+        "decision_envelopes",
+        "authority_decisions",
+    )
 
     def __init__(self, path: str | Path | None = None, *, backend: LedgerBackend | None = None,
                  signing_key: str | bytes | None = None):
@@ -159,19 +176,38 @@ class EvidenceLedger:
         return verification
 
     def register_action(self, action: ActionProposal, *, tenant_id: str = "default", project_id: str = "default") -> ActionProposal:
-        row = action.to_dict(); row["scope"] = {"tenant_id": tenant_id, "project_id": project_id}
+        row = action.to_dict()
+        row["scope"] = {"tenant_id": tenant_id, "project_id": project_id}
         self._append("actions", row, unique_key="action_id")
         return action
 
     def record_policy_decision(self, decision: PolicyDecision, *, tenant_id: str = "default", project_id: str = "default") -> PolicyDecision:
-        row = decision.to_dict(); row["scope"] = {"tenant_id": tenant_id, "project_id": project_id}
+        row = decision.to_dict()
+        row["scope"] = {"tenant_id": tenant_id, "project_id": project_id}
         self._append("policy_decisions", row, unique_key="decision_id")
         return decision
 
     def record_outcome(self, outcome: Outcome, *, tenant_id: str = "default", project_id: str = "default") -> Outcome:
-        row = outcome.to_dict(); row["scope"] = {"tenant_id": tenant_id, "project_id": project_id}
+        row = outcome.to_dict()
+        row["scope"] = {"tenant_id": tenant_id, "project_id": project_id}
         self._append("outcomes", row, unique_key="outcome_id")
         return outcome
+
+    def register_scoped_record(
+        self,
+        collection: str,
+        row: dict[str, Any],
+        *,
+        unique_key: str,
+        tenant_id: str,
+        project_id: str,
+    ) -> dict[str, Any]:
+        """Append a protocol extension record with canonical tenant scope."""
+        if collection not in {"decision_envelopes", "authority_decisions"}:
+            raise ValueError(f"Unsupported scoped extension collection: {collection}")
+        scoped = {**row, "scope": {"tenant_id": tenant_id, "project_id": project_id}}
+        self._append(collection, scoped, unique_key=unique_key)
+        return scoped
 
     def get_record(self, collection: str, record_id: str, id_key: str) -> dict[str, Any]:
         row = next((item for item in self._read()[collection] if item[id_key] == record_id), None)

@@ -1,5 +1,14 @@
 # Changelog
 
+## 4.1.0-rc.2 - 2026-08-08 (development candidate)
+
+- Added GRDI Decision Envelope and Authority Decision contracts.
+- Added fail-closed Authority Engine over signed, scoped HAV receipts.
+- Persisted GRDI records in the tamper-evident Core ledger.
+- Added scoped idempotent `/v4/grdi` endpoints.
+- Kept all authorized decisions non-executable and non-executed.
+- Added GRDI protocol, ADR, release notes and conformance tests.
+
 ## 4.1.0-rc.1 - 2026-08-06 (development candidate)
 
 - Integrated HAV v0.2 as canonical verification component (`phigraph.hav`).
