@@ -1,5 +1,14 @@
 # Changelog
 
+## 4.1.0-rc.3 - 2026-08-08 (development candidate)
+
+- Added shadow Execution Gateway for auditable execution plans without external effects.
+- Added `ExecutionRequest`, `GatewayDecision`, and `ShadowExecutionReceipt` ledger records.
+- Added `/v4/grdi/execution-plans` create/read/simulate endpoints with scoped idempotency.
+- Added signed shadow receipts verifiable by Core receipt signer.
+- Kept authority decisions non-executable and non-executed; no connector dispatch.
+- Added ADR-017, gateway protocol, shadow conformance report and release notes.
+
 ## 4.1.0-rc.2 - 2026-08-08 (development candidate)
 
 - Added GRDI Decision Envelope and Authority Decision contracts.
