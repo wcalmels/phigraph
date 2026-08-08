@@ -328,6 +328,18 @@ class GRDIService:
             raise ValueError("shadow_receipt_envelope_mismatch")
         if signed.get("authority_decision_id") != request.authority_decision_id:
             raise ValueError("shadow_receipt_authority_mismatch")
+        if signed.get("action_hash") != request.action_hash:
+            raise ValueError("shadow_receipt_action_hash_mismatch")
+        if signed.get("requested_action") != request.requested_action:
+            raise ValueError("shadow_receipt_action_mismatch")
+        if signed.get("tenant_id") != request.tenant_id:
+            raise ValueError("shadow_receipt_tenant_mismatch")
+        if signed.get("project_id") != request.project_id:
+            raise ValueError("shadow_receipt_project_mismatch")
+        if signed.get("expected_effects") != list(request.expected_effects):
+            raise ValueError("shadow_receipt_effects_mismatch")
+        if signed.get("rollback_strategy") != request.rollback_strategy:
+            raise ValueError("shadow_receipt_rollback_mismatch")
         if receipt.executed or receipt.external_side_effects or receipt.connector_invoked:
             raise ValueError("shadow_receipt_execution_claim_invalid")
         if signed.get("executed") or signed.get("external_side_effects") or signed.get("connector_invoked"):

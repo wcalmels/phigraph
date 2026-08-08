@@ -18,7 +18,7 @@ external execution.
 | Scoped idempotency | VALIDATED | Repeated plan and simulate requests are stable |
 | Backend-neutral persistence | VALIDATED | JSON reopen and SQLite persistence tests |
 | Ledger integrity | VALIDATED | Gateway records preserve the Core hash chain |
-| Signed shadow receipt replay integrity | VALIDATED | Stored receipts revalidated on read and simulate |
+| Receipt bound to execution request | VALIDATED | Signed plan must match request action, scope and rollback |
 | TOCTOU re-evaluation before simulate | VALIDATED | Envelope, authority and gateway re-checked atomically |
 | Single receipt per plan | VALIDATED | Concurrent simulation test and plan_id uniqueness |
 | Service restart durability | VALIDATED | Plans and receipts survive process reopen |
@@ -27,7 +27,7 @@ external execution.
 
 ## Verification
 
-- Baseline suite preserved: **199** tests passed (182 baseline + 17 gateway tests)
+- Baseline suite preserved: **200** tests passed (182 baseline + 18 gateway tests)
 - focal Ruff, Bandit, build, wheel and Docker checks expected green in CI
 
 ## Explicit limitations
@@ -35,3 +35,6 @@ external execution.
 - Shadow simulation does not write to Outcome Ledger.
 - Real connectors remain out of scope for this increment.
 - PostgreSQL behavior was not tested against a live PostgreSQL instance locally.
+- Simulate atomicity is enforced with an in-process ledger lock. Multi-process
+  or multi-node deployments require a transactional backend constraint; that
+  remains a future hardening item and does not block this shadow milestone.

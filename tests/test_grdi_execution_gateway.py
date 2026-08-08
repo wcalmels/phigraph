@@ -393,6 +393,37 @@ def test_tampered_shadow_receipt_fails_closed(tmp_path):
         grdi.get_execution_plan(plan["plan_id"], tenant_id="tenant-a", project_id="project-a")
 
 
+def test_mutated_execution_request_after_simulation_fails_closed(tmp_path):
+    core, grdi, envelope, decision = _authorized_setup(tmp_path)
+    plan = grdi.create_execution_plan(
+        **_plan_body(envelope, decision),
+        tenant_id="tenant-a",
+        project_id="project-a",
+        requested_by="operator-a",
+    )
+    grdi.simulate_execution_plan(plan["plan_id"], tenant_id="tenant-a", project_id="project-a")
+    tampered_action = {"type": "promote", "target": "production"}
+    _mutate_ledger_row(
+        core,
+        "execution_requests",
+        "plan_id",
+        plan["plan_id"],
+        {
+            "requested_action": tampered_action,
+            "action_hash": action_hash(tampered_action),
+        },
+        tenant_id="tenant-a",
+        project_id="project-a",
+    )
+    assert core.ledger.verify_chain()["valid"] is True
+
+    with pytest.raises(ValueError, match="shadow_receipt_action_hash_mismatch"):
+        grdi.get_execution_plan(plan["plan_id"], tenant_id="tenant-a", project_id="project-a")
+
+    with pytest.raises(ValueError, match="shadow_receipt_action_hash_mismatch"):
+        grdi.simulate_execution_plan(plan["plan_id"], tenant_id="tenant-a", project_id="project-a")
+
+
 def test_revalidation_after_service_restart(tmp_path):
     core, grdi, envelope, decision = _authorized_setup(tmp_path)
     plan = grdi.create_execution_plan(

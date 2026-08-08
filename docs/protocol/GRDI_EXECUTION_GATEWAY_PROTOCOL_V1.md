@@ -62,6 +62,14 @@ keys for mutating operations.
 - Envelope–authority mismatch is blocked.
 - Action hash drift after authorization is blocked.
 - Blocked plans cannot be simulated.
+- Stored shadow receipts must match the linked `ExecutionRequest` fields
+  (`action_hash`, `requested_action`, scope, effects, rollback) on read and replay.
+
+## Operational limits
+
+- Single-process simulate atomicity uses the in-process ledger lock. Multi-process
+  or multi-node atomicity requires a transactional backend constraint in a later
+  increment; it is documented here and does not block shadow v0.2.
 
 ## Explicit non-goals
 
