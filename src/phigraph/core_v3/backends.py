@@ -1,13 +1,13 @@
 from __future__ import annotations
 
-from abc import ABC, abstractmethod
-from pathlib import Path
-from threading import RLock
-from contextlib import contextmanager
 import contextvars
-from typing import Any
 import json
 import sqlite3
+from abc import ABC, abstractmethod
+from contextlib import contextmanager
+from pathlib import Path
+from threading import RLock
+from typing import Any
 
 
 class LedgerBackend(ABC):
@@ -29,7 +29,10 @@ class JsonLedgerBackend(LedgerBackend):
 
     def read_all(self) -> dict[str, list[dict[str, Any]]]:
         with self._lock:
-            return json.loads(self.path.read_text(encoding="utf-8"))
+            payload = json.loads(self.path.read_text(encoding="utf-8"))
+            for collection in self.collections:
+                payload.setdefault(collection, [])
+            return payload
 
     def write_all(self, payload: dict[str, list[dict[str, Any]]]) -> None:
         with self._lock:

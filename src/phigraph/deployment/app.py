@@ -1,31 +1,28 @@
 from __future__ import annotations
-from phigraph.version import CORE_VERSION, PROTOCOL_LABEL
 
-from importlib.metadata import version
-from pathlib import Path
 import os
 
 import pandas as pd
 from fastapi import FastAPI, Header, HTTPException
 from fastapi.responses import JSONResponse
 
+from phigraph.core_v3.api import create_core_v3_router
+from phigraph.cyber_mvp.api import create_cyber_mvp_router
+from phigraph.grdi.api import create_grdi_router
+from phigraph.hav.api import create_hav_router
 from phigraph.reliability import run_health_checks
 from phigraph.shadow_workflow import (
     ShadowWorkflowConfig,
     run_shadow_deployment_workflow,
 )
+from phigraph.version import CORE_VERSION
 
 from .config import DeploymentSettings, load_settings
+from .core_service import build_core_service, require_receipt_signing_key
+from .general_platform_app import create_general_platform_router
+from .platform_app import create_platform_router
 from .schemas import HealthResponse, ShadowRequest, ShadowResponse
 from .security import verify_api_key
-from .platform_app import create_platform_router
-from .general_platform_app import create_general_platform_router
-from phigraph.cyber_mvp.api import create_cyber_mvp_router
-from phigraph.core_v3.api import create_core_v3_router
-from phigraph.core_v3.service import CoreV3Service
-from phigraph.hav.api import create_hav_router
-
-from .core_service import build_core_service, require_receipt_signing_key
 
 
 def _package_version() -> str:
@@ -179,6 +176,14 @@ def create_app(
             allow_unauthenticated_dev=allow_unauthenticated_hav_dev,
             receipt_signing_key=receipt_signing_key,
             require_receipt_signing_key=settings.environment in {"staging", "production"},
+        )
+    )
+    app.include_router(
+        create_grdi_router(
+            service=core_service,
+            api_key=settings.api_key,
+            environment=settings.environment,
+            allow_unauthenticated_dev=allow_unauthenticated_hav_dev,
         )
     )
 

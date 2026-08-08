@@ -6,15 +6,16 @@
 [![Release](https://img.shields.io/badge/release-4.1.0--rc.1-orange.svg)](RELEASE_NOTES_V4.1.0.md)
 [![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.21689514.svg)](https://doi.org/10.5281/zenodo.21689514)
 
-**TUCH PhiGraph Core 4.1.0-rc.1** is a governed relational-intelligence platform for recording, verifying and controlling claims and actions produced by software agents and AI systems.
+**TUCH PhiGraph Core 4.1.0-rc.2** is a governed relational-intelligence platform for recording, verifying and controlling claims and actions produced by software agents and AI systems.
 
 > Model output is not verified truth. PhiGraph treats it as a candidate claim or action proposal until evidence, policy and verification establish otherwise.
 
 ## Status
 
-PhiGraph **4.1.0-rc.1** (`development candidate`) extends Core 4.0 with canonical HAV v0.2 verification. It is **shadow-first**: the supplied runtime does not grant arbitrary external execution authority.
+PhiGraph **4.1.0-rc.2** (`development candidate`) extends canonical HAV v0.2 with the first GRDI Foundation boundary: Decision Envelopes and fail-closed authority decisions. It is **shadow-first**: authorization never grants execution in this release.
 
-- Core version: `4.1.0-rc.1`
+- Core version: `4.1.0-rc.2`
+- GRDI version: `0.1.0`
 - HAV version: `0.2.0`
 - Protocol version: `2.0.0`
 - Automated tests: `146` (integration branch, this session)

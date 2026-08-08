@@ -2,17 +2,18 @@
 
 **Last updated:** 2026-08-06
 **Branch:** `integration/v4.1-grdi-foundation`
-**Release target:** 4.1.0-rc.1 → 4.1.0 stable
+**Release target:** 4.1.0-rc.2 → 4.1.0 stable
 
 ## Executive summary
 
-PhiGraph Core **4.1.0-rc.1** integrates HAV v0.2 as the canonical verification component. The integration branch reuses Core authentication, RBAC, idempotency, rate limiting and signed receipts. All **146** automated tests pass. The runtime remains **shadow-first**: verification receipts do not grant execution authority.
+PhiGraph Core **4.1.0-rc.2** adds GRDI Foundation v1 over canonical HAV v0.2. Decision Envelopes and authority decisions share Core authentication, scope, idempotency, signed receipts and ledger integrity. Execution Gateway and Outcome Ledger remain conceptual, so authorization cannot execute actions.
 
 ## Current versions
 
 | Artifact | Version |
 |----------|---------|
-| Core | 4.1.0-rc.1 (development candidate) |
+| Core | 4.1.0-rc.2 (development candidate) |
+| GRDI | 0.1.0 (Decision Envelope + Authority Engine) |
 | HAV | 0.2.0 |
 | Protocol | 2.0.0 |
 | Python | 3.10+ |
