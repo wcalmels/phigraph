@@ -45,5 +45,5 @@ VERIFIED → AUTHORIZED → ELIGIBLE_FOR_SHADOW → SIMULATED → NOT_EXECUTED
 
 ## Verification target
 
-- Baseline **182** tests preserved plus **12** new gateway tests (**194** total)
+- Baseline **182** tests preserved plus **17** gateway tests (**199** total)
 - Ruff, Bandit, build, wheel, Docker green in CI

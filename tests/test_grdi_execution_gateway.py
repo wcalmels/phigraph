@@ -3,6 +3,7 @@ from __future__ import annotations
 from concurrent.futures import ThreadPoolExecutor
 
 import pytest
+from test_grdi_foundation import _envelope, _receipt
 
 from phigraph.core_v3.service import CoreV3Service
 from phigraph.grdi import (
@@ -13,9 +14,9 @@ from phigraph.grdi import (
     GatewayEligibilityState,
     GRDIService,
     ShadowSimulationState,
+    VerificationState,
     action_hash,
 )
-from tests.test_grdi_foundation import _envelope, _receipt
 
 
 def _authorized_setup(tmp_path):
@@ -44,10 +45,26 @@ def _plan_body(envelope, decision, **overrides):
     return body
 
 
+def _mutate_ledger_row(core, collection, unique_key, record_id, changes, *, tenant_id, project_id):
+    rows = core.ledger.query(collection, tenant_id=tenant_id, project_id=project_id, limit=100000)
+    row = next(item for item in rows if item[unique_key] == record_id)
+    clean = {key: value for key, value in row.items() if key not in {"_chain", "scope"}}
+    clean.update(changes)
+    core.ledger.update_scoped_record(
+        collection,
+        clean,
+        unique_key=unique_key,
+        tenant_id=tenant_id,
+        project_id=project_id,
+    )
+
+
 def test_eligible_shadow_plan_and_simulation_without_execution(tmp_path):
     core, grdi, envelope, decision = _authorized_setup(tmp_path)
     plan = grdi.create_execution_plan(**_plan_body(envelope, decision), tenant_id="tenant-a", project_id="project-a", requested_by="operator-a")
     assert plan["gateway_decision"]["eligibility"] == GatewayEligibilityState.ELIGIBLE_FOR_SHADOW.value
+    assert plan["flow_state"]["verification"] == VerificationState.VERIFIED.value
+    assert plan["flow_state"]["authorization"] == AuthorizationState.AUTHORIZED.value
     assert plan["flow_state"]["execution"] == ExecutionState.NOT_EXECUTED.value
     assert decision.executability_state is ExecutabilityState.NOT_EXECUTABLE
     assert decision.execution_state is ExecutionState.NOT_EXECUTED
@@ -129,6 +146,8 @@ def test_unauthorized_and_requires_approval_decisions_block(tmp_path):
         requested_by="operator-a",
     )
     assert review_plan["gateway_decision"]["eligibility"] == GatewayEligibilityState.BLOCKED.value
+    assert review_plan["flow_state"]["authorization"] == AuthorizationState.REQUIRES_APPROVAL.value
+    assert review_plan["flow_state"]["verification"] == VerificationState.VERIFIED.value
     assert "authority_requires_approval" in review_plan["gateway_decision"]["reasons"]
 
     rejected = grdi.register_envelope(
@@ -148,6 +167,8 @@ def test_unauthorized_and_requires_approval_decisions_block(tmp_path):
         requested_by="operator-a",
     )
     assert blocked["gateway_decision"]["eligibility"] == GatewayEligibilityState.BLOCKED.value
+    assert blocked["flow_state"]["authorization"] == AuthorizationState.NOT_AUTHORIZED.value
+    assert blocked["flow_state"]["verification"] == VerificationState.NOT_VERIFIED.value
     assert "authority_not_authorized" in blocked["gateway_decision"]["reasons"]
 
 
@@ -278,6 +299,118 @@ def test_blocked_plan_cannot_simulate(tmp_path):
     )
     with pytest.raises(ValueError, match="plan_not_eligible_for_shadow"):
         grdi.simulate_execution_plan(blocked["plan_id"], tenant_id="tenant-a", project_id="project-a")
+
+
+def test_authority_change_after_planning_blocks_simulation(tmp_path):
+    core, grdi, envelope, decision = _authorized_setup(tmp_path)
+    plan = grdi.create_execution_plan(
+        **_plan_body(envelope, decision),
+        tenant_id="tenant-a",
+        project_id="project-a",
+        requested_by="operator-a",
+    )
+    _mutate_ledger_row(
+        core,
+        "authority_decisions",
+        "authority_decision_id",
+        decision.authority_decision_id,
+        {
+            "authorization_state": AuthorizationState.NOT_AUTHORIZED.value,
+            "verification_state": VerificationState.NOT_VERIFIED.value,
+        },
+        tenant_id="tenant-a",
+        project_id="project-a",
+    )
+    with pytest.raises(ValueError, match="plan_not_eligible_for_shadow"):
+        grdi.simulate_execution_plan(plan["plan_id"], tenant_id="tenant-a", project_id="project-a")
+
+
+def test_envelope_change_after_planning_blocks_simulation(tmp_path):
+    core, grdi, envelope, decision = _authorized_setup(tmp_path)
+    plan = grdi.create_execution_plan(
+        **_plan_body(envelope, decision),
+        tenant_id="tenant-a",
+        project_id="project-a",
+        requested_by="operator-a",
+    )
+    _mutate_ledger_row(
+        core,
+        "decision_envelopes",
+        "envelope_id",
+        envelope.envelope_id,
+        {"proposed_action": {"type": "promote", "target": "production"}},
+        tenant_id="tenant-a",
+        project_id="project-a",
+    )
+    with pytest.raises(ValueError, match="plan_not_eligible_for_shadow"):
+        grdi.simulate_execution_plan(plan["plan_id"], tenant_id="tenant-a", project_id="project-a")
+
+
+def test_concurrent_simulation_creates_single_receipt(tmp_path):
+    core, grdi, envelope, decision = _authorized_setup(tmp_path)
+    plan = grdi.create_execution_plan(
+        **_plan_body(envelope, decision),
+        tenant_id="tenant-a",
+        project_id="project-a",
+        requested_by="operator-a",
+    )
+
+    def simulate_once():
+        return grdi.simulate_execution_plan(plan["plan_id"], tenant_id="tenant-a", project_id="project-a")
+
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        results = list(pool.map(lambda _: simulate_once(), range(8)))
+
+    receipt_ids = {result["shadow_receipt"]["receipt_id"] for result in results}
+    assert len(receipt_ids) == 1
+    assert len(core.ledger.query("shadow_execution_receipts", tenant_id="tenant-a", project_id="project-a")) == 1
+
+
+def test_tampered_shadow_receipt_fails_closed(tmp_path):
+    core, grdi, envelope, decision = _authorized_setup(tmp_path)
+    plan = grdi.create_execution_plan(
+        **_plan_body(envelope, decision),
+        tenant_id="tenant-a",
+        project_id="project-a",
+        requested_by="operator-a",
+    )
+    simulated = grdi.simulate_execution_plan(plan["plan_id"], tenant_id="tenant-a", project_id="project-a")
+    _mutate_ledger_row(
+        core,
+        "shadow_execution_receipts",
+        "plan_id",
+        plan["plan_id"],
+        {
+            "normalized_plan": {
+                **simulated["shadow_receipt"]["normalized_plan"],
+                "signature": {"alg": "hmac-sha256", "key_id": "core-v3-default", "value": "deadbeef"},
+            }
+        },
+        tenant_id="tenant-a",
+        project_id="project-a",
+    )
+    with pytest.raises(ValueError, match="invalid_shadow_receipt_signature"):
+        grdi.get_execution_plan(plan["plan_id"], tenant_id="tenant-a", project_id="project-a")
+
+
+def test_revalidation_after_service_restart(tmp_path):
+    core, grdi, envelope, decision = _authorized_setup(tmp_path)
+    plan = grdi.create_execution_plan(
+        **_plan_body(envelope, decision),
+        tenant_id="tenant-a",
+        project_id="project-a",
+        requested_by="operator-a",
+    )
+    first = grdi.simulate_execution_plan(plan["plan_id"], tenant_id="tenant-a", project_id="project-a")
+
+    reopened = CoreV3Service(data_dir=tmp_path, receipt_signing_key="secret")
+    replay = GRDIService(reopened).simulate_execution_plan(
+        plan["plan_id"],
+        tenant_id="tenant-a",
+        project_id="project-a",
+    )
+    assert replay["shadow_receipt"]["receipt_id"] == first["shadow_receipt"]["receipt_id"]
+    assert replay["plan"]["flow_state"]["simulation"] == ShadowSimulationState.SIMULATED.value
 
 
 def test_action_hash_helper_is_stable():

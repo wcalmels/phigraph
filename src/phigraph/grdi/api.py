@@ -227,6 +227,8 @@ def create_grdi_router(
             )
         except KeyError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
 
     @router.post("/execution-plans/{plan_id}/simulate", status_code=201)
     def simulate_execution_plan(
