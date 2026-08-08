@@ -64,7 +64,7 @@ jobs:
           WHEEL_PATH=$(find dist -maxdepth 1 -name "*.whl" -print -quit)
           test -n "$WHEEL_PATH"
           /tmp/phigraph-wheel-test/bin/pip install "${WHEEL_PATH}[api,benchmark,auth,app]"
-          /tmp/phigraph-wheel-test/bin/python -c "from importlib.metadata import version; import phigraph; from phigraph.version import CORE_VERSION; assert CORE_VERSION == version('phigraph-causal')"
+          /tmp/phigraph-wheel-test/bin/python -c "from importlib.metadata import version; from packaging.version import Version; import phigraph; from phigraph.version import CORE_VERSION; assert Version(CORE_VERSION) == Version(version('phigraph-causal'))"
       - uses: actions/upload-artifact@v4
         with:
           name: phigraph-distributions
