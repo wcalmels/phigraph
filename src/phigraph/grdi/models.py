@@ -54,6 +54,21 @@ class ShadowSimulationState(str, Enum):
     SIMULATED = "SIMULATED"
 
 
+class EffectAssessmentState(str, Enum):
+    MATCHED = "MATCHED"
+    DEVIATED = "DEVIATED"
+    NOT_EVALUATED = "NOT_EVALUATED"
+
+
+class ShadowOutcomeState(str, Enum):
+    CONSISTENT = "CONSISTENT"
+    DEVIATED = "DEVIATED"
+    NOT_EVALUATED = "NOT_EVALUATED"
+
+
+OUTCOME_ORIGIN_SHADOW_SIMULATION = "SHADOW_SIMULATION"
+
+
 @dataclass(frozen=True)
 class Approval:
     approver: str
@@ -243,3 +258,76 @@ class ShadowExecutionReceipt:
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
+
+
+@dataclass(frozen=True)
+class EffectAssessment:
+    expected_effect: str
+    simulated_observation: str
+    state: EffectAssessmentState
+    evidence_refs: tuple[str, ...] = ()
+    rationale: str = ""
+
+    def to_dict(self) -> dict[str, Any]:
+        row = asdict(self)
+        row["state"] = self.state.value
+        row["evidence_refs"] = list(self.evidence_refs)
+        return row
+
+    @classmethod
+    def from_dict(cls, row: dict[str, Any]) -> "EffectAssessment":
+        return cls(
+            expected_effect=row["expected_effect"],
+            simulated_observation=row["simulated_observation"],
+            state=EffectAssessmentState(row["state"]),
+            evidence_refs=tuple(row.get("evidence_refs", ())),
+            rationale=row.get("rationale", ""),
+        )
+
+
+@dataclass(frozen=True)
+class ShadowOutcomeRecord:
+    outcome_id: str
+    plan_id: str
+    shadow_receipt_id: str
+    envelope_id: str
+    authority_decision_id: str
+    tenant_id: str
+    project_id: str
+    recorded_by: str
+    effect_assessments: tuple[EffectAssessment, ...]
+    outcome_state: ShadowOutcomeState
+    metrics: dict[str, Any] = field(default_factory=dict)
+    limitations: tuple[str, ...] = ()
+    outcome_origin: str = OUTCOME_ORIGIN_SHADOW_SIMULATION
+    executed: bool = False
+    external_side_effects: bool = False
+    connector_invoked: bool = False
+    execution_state: ExecutionState = ExecutionState.NOT_EXECUTED
+    source_receipt_hash: str = ""
+    signed_outcome: dict[str, Any] = field(default_factory=dict)
+    recorded_at: str = field(default_factory=utc_now)
+    version: str = GRDI_VERSION
+
+    @classmethod
+    def create(cls, **kwargs: Any) -> "ShadowOutcomeRecord":
+        return cls(outcome_id=new_id("so"), **kwargs)
+
+    def to_dict(self) -> dict[str, Any]:
+        row = asdict(self)
+        row["effect_assessments"] = [assessment.to_dict() for assessment in self.effect_assessments]
+        row["limitations"] = list(self.limitations)
+        row["outcome_state"] = self.outcome_state.value
+        row["execution_state"] = self.execution_state.value
+        return row
+
+    @classmethod
+    def from_dict(cls, row: dict[str, Any]) -> "ShadowOutcomeRecord":
+        clean = {key: value for key, value in row.items() if key not in {"_chain", "scope"}}
+        clean["effect_assessments"] = tuple(
+            EffectAssessment.from_dict(item) for item in clean.get("effect_assessments", ())
+        )
+        clean["limitations"] = tuple(clean.get("limitations", ()))
+        clean["outcome_state"] = ShadowOutcomeState(clean["outcome_state"])
+        clean["execution_state"] = ExecutionState(clean["execution_state"])
+        return cls(**clean)

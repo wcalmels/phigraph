@@ -45,7 +45,7 @@ def test_v3_api_claim_evidence_verification_and_runtime(tmp_path):
 
     status = client.get("/v3/status")
     assert status.status_code == 200
-    assert status.json()["version"] == "4.1.0-rc.3"
+    assert status.json()["version"] == "4.1.0-rc.4"
 
     claim = client.post("/v3/claims", json={
         "statement": "tests passed",

@@ -9,9 +9,14 @@ from phigraph.core_v3.api_key_identity import ApiKeyIdentity
 from phigraph.core_v3.auth_deps import build_core_auth_dependencies
 from phigraph.core_v3.security import Role
 from phigraph.core_v3.service import CoreV3Service
-from phigraph.grdi.models import Approval, DecisionEnvelope
+from phigraph.grdi.models import Approval, DecisionEnvelope, EffectAssessment, EffectAssessmentState
 from phigraph.grdi.service import GRDIService
-from phigraph.version import CORE_VERSION, GRDI_VERSION, PROTOCOL_VERSION
+from phigraph.version import (
+    CORE_VERSION,
+    GRDI_OUTCOME_LEDGER_PROTOCOL_VERSION,
+    GRDI_VERSION,
+    PROTOCOL_VERSION,
+)
 
 
 class DecisionEnvelopeRequest(BaseModel):
@@ -38,6 +43,20 @@ class ExecutionPlanRequest(BaseModel):
     requested_action: dict[str, Any]
     expected_effects: list[str] = Field(default_factory=list)
     rollback_strategy: dict[str, Any] = Field(default_factory=dict)
+
+
+class EffectAssessmentRequest(BaseModel):
+    expected_effect: str = Field(min_length=1)
+    simulated_observation: str = Field(min_length=1)
+    state: EffectAssessmentState
+    evidence_refs: list[str] = Field(default_factory=list)
+    rationale: str = ""
+
+
+class ShadowOutcomeRequest(BaseModel):
+    effect_assessments: list[EffectAssessmentRequest] = Field(min_length=1)
+    metrics: dict[str, Any] = Field(default_factory=dict)
+    limitations: list[str] = Field(default_factory=list)
 
 
 def create_grdi_router(
@@ -71,6 +90,8 @@ def create_grdi_router(
             "tenant_id": identity.tenant_id,
             "project_id": identity.project_id,
             "execution_gateway": "shadow_v0.1",
+            "outcome_ledger": "shadow_v0.1",
+            "outcome_ledger_protocol": GRDI_OUTCOME_LEDGER_PROTOCOL_VERSION,
         }
 
     @router.post("/envelopes", status_code=201)
@@ -262,5 +283,91 @@ def create_grdi_router(
             tenant_id=identity.tenant_id,
             project_id=identity.project_id,
         )
+
+    @router.post("/execution-plans/{plan_id}/outcomes", status_code=201)
+    def record_shadow_outcome(
+        plan_id: str,
+        body: ShadowOutcomeRequest,
+        idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
+        identity=Depends(auth.require("grdi:record_outcome")),
+    ) -> dict[str, Any]:
+        assessments = tuple(
+            EffectAssessment(
+                expected_effect=item.expected_effect,
+                simulated_observation=item.simulated_observation,
+                state=item.state,
+                evidence_refs=tuple(item.evidence_refs),
+                rationale=item.rationale,
+            )
+            for item in body.effect_assessments
+        )
+        payload = {
+            "plan_id": plan_id,
+            "effect_assessments": [item.model_dump(mode="json") for item in body.effect_assessments],
+            "metrics": body.metrics,
+            "limitations": body.limitations,
+            "tenant_id": identity.tenant_id,
+            "project_id": identity.project_id,
+            "recorded_by": identity.subject,
+        }
+
+        def operation() -> dict[str, Any]:
+            try:
+                return grdi.record_shadow_outcome(
+                    plan_id,
+                    tenant_id=identity.tenant_id,
+                    project_id=identity.project_id,
+                    recorded_by=identity.subject,
+                    effect_assessments=assessments,
+                    metrics=body.metrics,
+                    limitations=tuple(body.limitations),
+                )
+            except KeyError as exc:
+                raise HTTPException(status_code=404, detail=str(exc)) from exc
+            except ValueError as exc:
+                detail = str(exc)
+                if detail in {
+                    "effect_assessments_required",
+                    "expected_effect_required",
+                    "simulated_observation_required",
+                    "duplicate_expected_effect",
+                }:
+                    raise HTTPException(status_code=422, detail=detail) from exc
+                raise HTTPException(status_code=409, detail=detail) from exc
+
+        return auth.idempotent(
+            idempotency_key,
+            payload,
+            operation,
+            operation_name="grdi.shadow_outcome.record",
+            tenant_id=identity.tenant_id,
+            project_id=identity.project_id,
+        )
+
+    @router.get("/outcomes/{outcome_id}")
+    def get_shadow_outcome(outcome_id: str, identity=Depends(auth.require("read"))) -> dict[str, Any]:
+        try:
+            return grdi.get_shadow_outcome(
+                outcome_id,
+                tenant_id=identity.tenant_id,
+                project_id=identity.project_id,
+            )
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+    @router.get("/execution-plans/{plan_id}/outcome")
+    def get_outcome_for_plan(plan_id: str, identity=Depends(auth.require("read"))) -> dict[str, Any]:
+        try:
+            return grdi.get_outcome_for_plan(
+                plan_id,
+                tenant_id=identity.tenant_id,
+                project_id=identity.project_id,
+            )
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
 
     return router

@@ -43,7 +43,7 @@ def test_health_metrics_and_integrity_endpoints(tmp_path):
     app = FastAPI()
     app.include_router(create_core_v3_router(tmp_path, allow_unauthenticated_dev=True))
     client = TestClient(app)
-    assert client.get("/v3/health/live").json()["version"] == "4.1.0-rc.3"
+    assert client.get("/v3/health/live").json()["version"] == "4.1.0-rc.4"
     assert client.get("/v3/health/ready").status_code == 200
     assert client.get("/v3/ledger/integrity").json()["valid"] is True
     client.get("/v3/status")
