@@ -61,10 +61,10 @@ Legend: **Keep** = minor edits; **Revise** = rewrite; **New** = add section.
 | 4 | PhiGraph Architecture | **Revise** | split Core / GRDI / HAV; Figure 1 update |
 | 4.1 | Canonical protocol | **Keep** | Protocol 2.0.0 lifecycle; Figure 2 update |
 | 4.2 | Evidence ledger (legacy) | **Revise** | point to scoped transactional store |
-| **4.3** | **Transactional scoped ledger** | **New** | ADR-020, CORE_TRANSACTIONAL_LEDGER_PROTOCOL_V1, Figure 6–7 |
+| **§4.3** | **Transactional scoped ledger** | **Done** | ADR-020, Fig. 6–7 |
 | 4.4 | Policy-gated runtime | **Keep** | shadow vs execution modes |
 | 4.5 | HAV v0.2 | **Keep** | Figures 3–4 unchanged unless auth scope text updates |
-| **4.6** | **GRDI shadow decision chain** | **New** | ADR-016–019, GRDI protocols, Figure 8 |
+| **4.6** | **GRDI shadow decision chain** | **Done** | ADR-016–019, Fig. 8 |
 | 4.7 | API, SDK, and operations | **Revise** | deployment boundaries, identity for HAV |
 | 5 | Evaluation | **Revise** | restructure subsections |
 | 5.1 | Research questions | **Revise** | RQ on integrity, idempotency, replay determinism |
@@ -90,9 +90,9 @@ Legend: **Keep** = minor edits; **Revise** = rewrite; **New** = add section.
 | 3 HAV pipeline | TikZ | Keep |
 | 4 HAV fail-closed flowchart | TikZ | Keep |
 | 5 CIC-IDS2017 bars | pgfplots | Keep (same data) |
-| **6 Scoped transaction** | — | **New** — `run_scoped_transaction`, LockRef order, commit/rollback |
-| **7 Chain-linked vs mutable** | — | **New** — GRDI append-only chains vs Core CAS collections |
-| **8 GRDI shadow pipeline** | — | **New** — envelope → authority → plan → gateway → receipt → outcome → replay |
+| **6 Scoped transaction** | — | **Done** |
+| **7 Chain-linked vs mutable** | — | **Done** |
+| **8 GRDI shadow pipeline** | — | **Done** |
 | 9 (optional) `verify_scoped_chain` | — | **New** — fail-closed checks (missing head, gaps, tamper) |
 
 All figures: `\usepackage{float}` + `[H]` placement (same as v1).

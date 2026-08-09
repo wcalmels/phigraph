@@ -420,6 +420,62 @@ Integrity verification is a separate fail-closed read path.}
 \label{fig:scoped-transaction}
 \end{figure}
 
+\paragraph{Chain-linked versus mutable collections.}
+GRDI persistence collections are \emph{chain-linked}: each append extends a
+per-scope hash chain and \texttt{compare\_and\_set\_scoped} is rejected.
+Core protocol collections (\texttt{claims}, \texttt{evidence},
+\texttt{verifications}, \texttt{actions}, \texttt{policy\_decisions},
+\texttt{outcomes}) are stored as \emph{mutable} scoped rows with standalone
+content hashes and support conditional updates. Mixing the two modes in one
+transaction is permitted, but a compare-and-set on a chain-linked collection
+always fails closed. Figure~\ref{fig:chain-mutable} contrasts the two storage
+semantics.
+
+\begin{figure}[H]
+\centering
+\resizebox{\linewidth}{!}{%
+\begin{tikzpicture}[
+  node distance=4mm and 8mm,
+  every node/.style={font=\small},
+  box/.style={draw, rounded corners=2pt, align=center, inner sep=4pt},
+  col/.style={box, minimum width=5.6cm, minimum height=6.8cm},
+  arr/.style={-{Latex[length=2mm]}, thick}
+]
+
+\node[col, fill=orange!10] (linked) at (0,0) {};
+\node[font=\small\bfseries, anchor=north] at (linked.north) {Chain-linked GRDI};
+\node[align=left, anchor=north west, font=\scriptsize] at ($(linked.north west)+(2mm,-4mm)$) {
+  \texttt{append\_scoped} / \texttt{append\_scoped\_once}\\[1mm]
+  Collections: envelopes, authority,\\
+  execution plans, gateway, receipts,\\
+  outcomes, replay reports\\[1mm]
+  \texttt{\_chain}: linked sequence\\
+  \texttt{verify\_scoped\_chain}\\[1mm]
+  \textbf{No} compare-and-set
+};
+
+\node[col, fill=blue!8, right=12mm of linked] (mutable) {};
+\node[font=\small\bfseries, anchor=north] at (mutable.north) {Mutable Core};
+\node[align=left, anchor=north west, font=\scriptsize] at ($(mutable.north west)+(2mm,-4mm)$) {
+  \texttt{append\_scoped} + \texttt{compare\_and\_set}\\[1mm]
+  Collections: claims, evidence,\\
+  verifications, actions, policies,\\
+  outcomes (protocol layer)\\[1mm]
+  Standalone content hash\\
+  (no append chain)\\[1mm]
+  CAS on expected payload hash
+};
+
+\draw[arr] (linked.east) -- (mutable.west)
+  node[midway, above, font=\scriptsize] {same scope key};
+
+\end{tikzpicture}%
+}
+\caption{Chain-linked GRDI collections extend an append-only scoped hash chain;
+mutable Core collections support conditional updates without chain linking.}
+\label{fig:chain-mutable}
+\end{figure}
+
 \subsection{Policy-gated runtime}
 
 The policy engine matches action type, permitted runtime modes, maximum risk,
@@ -617,6 +673,80 @@ overlap and conflicting status terms across several candidate outputs) is
 exposed only as an auxiliary diagnostic signal, not as a verification result
 on its own, and does not influence the policy decision above.
 
+\subsection{GRDI shadow decision chain}
+\label{sec:grdi}
+
+Governed Relational Decision Intelligence (GRDI) version~0.4.0 extends PhiGraph
+with a persisted \emph{shadow} decision chain that binds HAV verification,
+human or policy authority, execution planning, simulated gateway decisions,
+shadow receipts, outcomes, and deterministic replay audit. GRDI writes only
+through the scoped transactional API in Section~\ref{sec:transactional-ledger}
+and never invokes external connectors or live executors in the current release.
+
+\paragraph{State separation.} Verification (\texttt{VERIFIED} /
+\texttt{NOT\_VERIFIED}), authorization (\texttt{AUTHORIZED} /
+\texttt{NOT\_AUTHORIZED} / \texttt{REQUIRES\_APPROVAL}), and execution
+(\texttt{NOT\_EXECUTED} throughout Foundation and shadow increments) are
+stored as distinct fields. A passing HAV receipt does not by itself authorize
+an action; an authorized envelope does not imply that an external action was
+executed. The shadow execution gateway may record \texttt{SIMULATED} plans and
+signed receipts while preserving \texttt{execution\_state=NOT\_EXECUTED}.
+
+\paragraph{Persisted chain.} A typical shadow path appends, in order:
+\texttt{DecisionEnvelope} (HAV receipt and proposed action),
+\texttt{AuthorityDecision}, \texttt{ExecutionRequest},
+\texttt{GatewayDecision}, optional \texttt{GatewayDecisionEvent},
+\texttt{ShadowExecutionReceipt}, and \texttt{ShadowOutcomeRecord}. Replay
+audit appends \texttt{ReplayReport} and \texttt{HistoricalComparison}
+records that re-verify the stored chain without re-running simulation or
+authority evaluation. Invalid signatures, scope mismatches, or broken links
+fail closed into explicit \texttt{INVALID} or \texttt{INCOMPLETE} replay
+states; replay never calls chain repair routines.
+
+Figure~\ref{fig:grdi-pipeline} shows the end-to-end shadow flow implemented
+on \texttt{main} at Core~4.1.0-rc.6. External execution and PostgreSQL-scoped
+transactions remain \emph{specified} future work, not claims of this paper.
+
+\begin{figure}[H]
+\centering
+\resizebox{\linewidth}{!}{%
+\begin{tikzpicture}[
+  node distance=3mm and 4mm,
+  every node/.style={font=\scriptsize},
+  stage/.style={draw, rounded corners=2pt, align=center, fill=green!10, minimum width=1.55cm, minimum height=0.75cm, inner sep=2pt},
+  arr/.style={-{Latex[length=1.8mm]}, thick},
+  note/.style={font=\tiny, align=center, text=gray!50!black}
+]
+
+\node[stage] (hav) {HAV\\receipt};
+\node[stage, right=of hav] (env) {Decision\\envelope};
+\node[stage, right=of env] (auth) {Authority\\decision};
+\node[stage, right=of auth] (plan) {Execution\\request};
+\node[stage, right=of plan] (gw) {Gateway\\decision};
+\node[stage, right=of gw] (rcpt) {Shadow\\receipt};
+\node[stage, right=of rcpt] (out) {Shadow\\outcome};
+
+\node[stage, below=5mm of rcpt, fill=blue!8] (replay) {Replay report};
+\node[stage, right=3mm of replay, fill=blue!8] (cmp) {Historical\\comparison};
+
+\foreach \a/\b in {hav/env, env/auth, auth/plan, plan/gw, gw/rcpt, rcpt/out} {
+  \draw[arr] (\a) -- (\b);
+}
+\draw[arr] (out.south) -- ++(0,-2mm) -| (replay.north);
+\draw[arr] (replay) -- (cmp);
+
+\node[note, below=2mm of plan] {all stages: shadow / NOT\_EXECUTED};
+\node[note, below=2mm of cmp] {verify persisted chain only; no re-simulation};
+
+\end{tikzpicture}%
+}
+\caption{GRDI~0.4.0 shadow decision chain. Each box is an append-only,
+scope-tagged ledger collection linked through the transactional store.
+Replay audit reads and verifies history without invoking connectors or
+re-running simulation.}
+\label{fig:grdi-pipeline}
+\end{figure}
+
 \section{Evaluation}
 
 \subsection{Research questions}
@@ -692,6 +822,17 @@ gaps, column tampering, and coordinated metadata manipulation). These tests
 establish \emph{implemented} integrity behavior for the shipped backends; they
 do not prove security against a privileged attacker with signing keys and
 unrestricted storage access.
+
+\subsection{GRDI replay audit scenarios}
+\label{sec:grdi-eval}
+
+GRDI replay and historical-comparison modules are covered by automated tests
+that rebuild manifest hashes from persisted shadow records, reject tampered
+receipt links, and assert explicit non-execution invariants
+(\texttt{replay\_executed=false}, \texttt{connector\_invoked=false}).
+These tests confirm \emph{implemented} read-only audit behavior on JSON and
+SQLite backends; they do not establish causal correctness of shadow
+simulations or semantic equivalence between production deployments.
 
 \subsection{External anomaly-ranking experiment}
 
