@@ -47,6 +47,30 @@ Output: `main.pdf`.
 
 On Windows with MiKTeX/TeX Live installed, the same commands apply from PowerShell.
 
+### DOCX export (Zenodo supplementary)
+
+Pandoc converts prose and bibliography; **TikZ figures appear only in the PDF**:
+
+```powershell
+pandoc main.tex -o main.docx --bibliography=references.bib --citeproc --standalone
+```
+
+Or run `.\build.ps1` to rebuild PDF and DOCX together.
+
+### Zenodo deposit files
+
+Upload at minimum:
+
+| File | Role |
+|------|------|
+| `main.pdf` | Primary publication (vector figures) |
+| `main.docx` | Accessible text export |
+| `main.tex` | Reproducible LaTeX source |
+| `references.bib` | Bibliography source |
+| `LICENSE.md` | Paper license (CC BY 4.0) |
+
+Metadata draft: `zenodo_metadata.json` (v2 update pending).
+
 ---
 
 ## v2 workflow (draft)

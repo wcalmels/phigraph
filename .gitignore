@@ -28,6 +28,10 @@ results/
 *.sqlite
 *.sqlite3
 *.log
+paper/*.aux
+paper/*.bbl
+paper/*.blg
+paper/*.out
 backups/
 
 # IDE and OS
