@@ -10,6 +10,7 @@ required for the generic SQLite/PostgreSQL ledger tables.
 | Foundation v0.1 | `decision_envelopes`, `authority_decisions` |
 | Execution Gateway v0.2 | `execution_requests`, `gateway_decisions`, `shadow_execution_receipts` |
 | Outcome Ledger v0.3 | `shadow_outcomes` |
+| Replay Audit v0.4 | `replay_reports`, `historical_comparisons` |
 
 ## Compatibility
 
@@ -23,5 +24,7 @@ required for the generic SQLite/PostgreSQL ledger tables.
 
 - Outcome recording enforces one row per `shadow_receipt_id` with the in-process
   ledger lock.
-- Multi-node uniqueness for outcomes requires a future transactional backend
-  constraint, similar to shadow simulation receipts.
+- Replay reports are idempotent by canonical `manifest_hash`; comparisons by
+  `comparison_key` (baseline + candidate + policy version).
+- Multi-node uniqueness for outcomes, replays, and comparisons requires a future
+  transactional backend constraint.

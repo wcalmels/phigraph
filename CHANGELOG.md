@@ -1,5 +1,13 @@
 # Changelog
 
+## 4.1.0-rc.5 - 2026-08-08 (development candidate)
+
+- Added deterministic GRDI Replay Audit engine over the persisted shadow chain.
+- Added signed `ReplayReport` and `HistoricalComparison` records with fail-closed validation.
+- Added `/v4/grdi/execution-plans/{plan_id}/replays` and replay comparison endpoints.
+- Enforced replay invariants: no simulation rerun, execution, connectors, or external effects.
+- Added ADR-019, replay protocol, conformance report and release notes.
+
 ## 4.1.0-rc.4 - 2026-08-08 (development candidate)
 
 - Added immutable Shadow Outcome Ledger fed only by validated simulation receipts.

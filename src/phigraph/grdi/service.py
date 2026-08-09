@@ -18,6 +18,8 @@ from phigraph.grdi.models import (
     ExecutionState,
     GatewayDecision,
     GatewayEligibilityState,
+    HistoricalComparison,
+    ReplayReport,
     ShadowExecutionReceipt,
     ShadowOutcomeRecord,
     ShadowSimulationState,
@@ -25,6 +27,7 @@ from phigraph.grdi.models import (
     action_hash,
 )
 from phigraph.grdi.outcome_ledger import aggregate_outcome_state, validate_effect_assessments
+from phigraph.grdi.replay import ReplayEngine
 from phigraph.version import GRDI_VERSION
 
 
@@ -33,6 +36,7 @@ class GRDIService:
         self.core = core
         self.authority = AuthorityEngine(core.receipt_signer)
         self.gateway = ExecutionGateway(core.receipt_signer)
+        self.replay = ReplayEngine(self)
 
     def register_envelope(self, envelope: DecisionEnvelope) -> DecisionEnvelope:
         self.core.ledger.register_scoped_record(
@@ -361,6 +365,100 @@ class GRDIService:
         request = self._get_execution_request(signed_plan_id, tenant_id=tenant_id, project_id=project_id)
         receipt = self._load_validated_shadow_receipt(request, tenant_id=tenant_id, project_id=project_id)
         return self._validate_shadow_outcome(record, request, receipt).to_dict()
+
+    def create_replay_report(
+        self,
+        plan_id: str,
+        *,
+        tenant_id: str,
+        project_id: str,
+        requested_by: str,
+    ) -> dict[str, Any]:
+        with self.core.ledger._lock:
+            rows = self.replay._load_chain_rows(plan_id, tenant_id=tenant_id, project_id=project_id)
+            if rows["execution_request"] is None:
+                raise KeyError("execution_plan_not_found_in_scope")
+            report = self.replay.build_report(
+                plan_id,
+                tenant_id=tenant_id,
+                project_id=project_id,
+                requested_by=requested_by,
+            )
+            stored_row, _created = self.core.ledger.register_scoped_record_once(
+                "replay_reports",
+                report.to_dict(),
+                unique_key="manifest_hash",
+                tenant_id=tenant_id,
+                project_id=project_id,
+            )
+            stored = ReplayReport.from_dict(stored_row)
+            return self.replay.validate_report(stored, verify_sources=False).to_dict()
+
+    def get_replay_report(self, replay_id: str, *, tenant_id: str, project_id: str) -> dict[str, Any]:
+        row = self._get_replay_row(replay_id, tenant_id=tenant_id, project_id=project_id)
+        report = ReplayReport.from_dict(row)
+        return self.replay.validate_report(report).to_dict()
+
+    def list_replays_for_plan(self, plan_id: str, *, tenant_id: str, project_id: str) -> list[dict[str, Any]]:
+        rows = self.core.ledger.query("replay_reports", tenant_id=tenant_id, project_id=project_id, limit=100000)
+        results: list[dict[str, Any]] = []
+        for row in rows:
+            if row.get("plan_id") != plan_id:
+                continue
+            report = ReplayReport.from_dict(row)
+            results.append(self.replay.validate_report(report, verify_sources=True).to_dict())
+        return results
+
+    def compare_replays(
+        self,
+        baseline_replay_id: str,
+        candidate_replay_id: str,
+        *,
+        tenant_id: str,
+        project_id: str,
+        requested_by: str,
+    ) -> dict[str, Any]:
+        with self.core.ledger._lock:
+            baseline_row = self._get_replay_row(baseline_replay_id, tenant_id=tenant_id, project_id=project_id)
+            candidate_row = self._get_replay_row(candidate_replay_id, tenant_id=tenant_id, project_id=project_id)
+            baseline = ReplayReport.from_dict(baseline_row)
+            candidate = ReplayReport.from_dict(candidate_row)
+            comparison = self.replay.compare_reports(baseline, candidate, requested_by=requested_by)
+            stored_row, _created = self.core.ledger.register_scoped_record_once(
+                "historical_comparisons",
+                comparison.to_dict(),
+                unique_key="comparison_key",
+                tenant_id=tenant_id,
+                project_id=project_id,
+            )
+            stored = HistoricalComparison.from_dict(stored_row)
+            return self.replay.validate_comparison(stored).to_dict()
+
+    def get_historical_comparison(
+        self,
+        comparison_id: str,
+        *,
+        tenant_id: str,
+        project_id: str,
+    ) -> dict[str, Any]:
+        rows = self.core.ledger.query(
+            "historical_comparisons",
+            tenant_id=tenant_id,
+            project_id=project_id,
+            limit=100000,
+        )
+        row = next((item for item in rows if item["comparison_id"] == comparison_id), None)
+        if row is None:
+            raise KeyError("historical_comparison_not_found_in_scope")
+        comparison = HistoricalComparison.from_dict(row)
+        return self.replay.validate_comparison(comparison).to_dict()
+
+    def _get_replay_row(self, replay_id: str, *, tenant_id: str, project_id: str) -> dict[str, Any]:
+        rows = self.core.ledger.query("replay_reports", tenant_id=tenant_id, project_id=project_id, limit=100000)
+        row = next((item for item in rows if item["replay_id"] == replay_id), None)
+        if row is None:
+            raise KeyError("replay_report_not_found_in_scope")
+        return row
 
     @staticmethod
     def _source_receipt_hash(receipt: ShadowExecutionReceipt) -> str:

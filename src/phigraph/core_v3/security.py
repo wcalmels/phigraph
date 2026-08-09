@@ -29,6 +29,8 @@ _PERMISSIONS = {
             "grdi:plan",
             "grdi:simulate",
             "grdi:record_outcome",
+            "grdi:replay",
+            "grdi:compare",
         }
     ),
     Role.ADMIN: frozenset({"*"}),
