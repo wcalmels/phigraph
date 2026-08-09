@@ -32,6 +32,9 @@ CAS_ALLOWED_COLLECTIONS = frozenset({
     "outcomes",
 })
 
+CHAIN_LINKED_COLLECTIONS = SCOPED_COLLECTIONS
+MUTABLE_SCOPED_COLLECTIONS = CAS_ALLOWED_COLLECTIONS
+
 COLLECTION_RECORD_ID_KEYS: dict[str, str] = {
     "decision_envelopes": "envelope_id",
     "authority_decisions": "authority_decision_id",
@@ -83,6 +86,10 @@ class TransactionUnavailable(LedgerError):
 
 class LedgerIntegrityError(LedgerError):
     """Chain or integrity validation failed."""
+
+
+class UndeclaredLockRef(LedgerError):
+    """Write attempted without a pre-declared lock ref inside a scoped transaction."""
 
 
 class LockKind(str, Enum):
@@ -168,6 +175,44 @@ def validate_lock_refs_scope(
     for ref in lock_refs:
         if ref.tenant_id != tenant_id or ref.project_id != project_id:
             raise ValueError("lock_refs scope must match run_scoped_transaction scope")
+
+
+@dataclass(frozen=True)
+class LockContext:
+    chain_locks: frozenset[str]
+    canonical_locks: frozenset[tuple[str, str]]
+
+
+def build_lock_context(lock_refs: tuple[LockRef, ...]) -> LockContext:
+    return LockContext(
+        chain_locks=frozenset(ref.collection for ref in lock_refs if ref.kind == LockKind.CHAIN),
+        canonical_locks=frozenset(
+            (ref.collection, ref.canonical_key)
+            for ref in lock_refs
+            if ref.kind == LockKind.CANONICAL
+        ),
+    )
+
+
+def is_chain_linked_collection(collection: str) -> bool:
+    return collection in CHAIN_LINKED_COLLECTIONS
+
+
+def require_write_locks(
+    lock_context: LockContext | None,
+    *,
+    collection: str,
+    canonical_key: str,
+    require_chain: bool,
+) -> None:
+    if lock_context is None:
+        return
+    if require_chain and collection not in lock_context.chain_locks:
+        raise UndeclaredLockRef(f"Missing CHAIN lock for collection: {collection}")
+    if (collection, canonical_key) not in lock_context.canonical_locks:
+        raise UndeclaredLockRef(
+            f"Missing CANONICAL lock for collection={collection} key={canonical_key}"
+        )
 
 
 APPEND_SCOPED_COLLECTIONS = SCOPED_COLLECTIONS | CAS_ALLOWED_COLLECTIONS

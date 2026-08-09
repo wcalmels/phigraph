@@ -1,7 +1,7 @@
 # Core Transactional Ledger Conformance Report
 
-**Date:** 2026-08-09  
-**Branch:** `feature/core-transactional-ledger-api-v1`  
+**Date:** 2026-08-09
+**Branch:** `feature/core-transactional-ledger-api-v1`
 **Core:** 4.1.0-rc.6  
 **Protocol:** Transactional Ledger 0.1.0 (implementation candidate)
 
@@ -21,6 +21,7 @@ Public transactional API on `EvidenceLedger` for **JSON** (single-process) and *
 | `list_scoped` | yes | yes |
 | `compare_and_set_scoped` | yes | yes |
 | `run_scoped_transaction` | yes | yes |
+| `verify_scoped_chain` | yes | yes |
 | `migrate_legacy_scoped_sqlite` | n/a | yes |
 
 Module: `src/phigraph/core_v3/transactions.py`, `scoped_ledger.py`.
@@ -45,11 +46,12 @@ Module: `src/phigraph/core_v3/transactions.py`, `scoped_ledger.py`.
 
 ## Contract tests
 
-19 tests under `tests/contract/` (9 JSON, 10 SQLite including real `multiprocessing`).
+25 tests under `tests/contract/` including lock enforcement, thread-local isolation,
+CAS/chain separation, commit failure recovery, and tamper detection.
 
 ## Regression
 
-- **281** total automated tests passing (262 baseline + 19 contract)
+- **287** total automated tests passing (262 baseline + 25 contract)
 - GRDIService unchanged
 - Legacy scoped methods preserved
 

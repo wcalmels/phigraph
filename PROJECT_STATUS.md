@@ -40,7 +40,7 @@ legacy scoped methods until a follow-up refactor PR.
 
 ## Test status
 
-- **281** automated tests passing locally
+- **287** automated tests passing locally
 
 ## Known limitations
 

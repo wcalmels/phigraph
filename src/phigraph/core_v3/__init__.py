@@ -20,6 +20,7 @@ __all__ = [
     "LockKind", "LockRef", "ScopedRecordResult", "CompareAndSetResult",
     "LedgerError", "DuplicateCanonicalKey", "ScopedRecordNotFound",
     "VersionConflict", "TransactionUnavailable", "LedgerIntegrityError",
+    "UndeclaredLockRef",
     "canonical_scoped_payload_hash",
 ]
 
@@ -34,6 +35,7 @@ from .transactions import (
     ScopedRecordNotFound,
     ScopedRecordResult,
     TransactionUnavailable,
+    UndeclaredLockRef,
     VersionConflict,
     canonical_scoped_payload_hash,
 )

@@ -1,7 +1,7 @@
 # Release Notes — PhiGraph Core 4.1.0-rc.6
 
-**Date:** 2026-08-09  
-**Status:** development candidate  
+**Date:** 2026-08-09
+**Status:** development candidate
 **Branch:** `feature/core-transactional-ledger-api-v1`
 
 ## Summary

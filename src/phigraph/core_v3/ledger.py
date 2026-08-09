@@ -449,8 +449,21 @@ class EvidenceLedger:
         fn: Callable[[ScopedTransactionSession], Any],
     ) -> Any:
         validate_lock_refs_scope(lock_refs, tenant_id=tenant_id, project_id=project_id)
-        normalize_lock_refs(lock_refs)
-        return self._scoped_engine.run_scoped_transaction(tenant_id, project_id, fn)
+        ordered = normalize_lock_refs(lock_refs)
+        return self._scoped_engine.run_scoped_transaction(tenant_id, project_id, ordered, fn)
+
+    def verify_scoped_chain(
+        self,
+        *,
+        tenant_id: str | None = None,
+        project_id: str | None = None,
+        collection: str | None = None,
+    ) -> dict[str, Any]:
+        return self._scoped_engine.verify_scoped_chain(
+            tenant_id=tenant_id,
+            project_id=project_id,
+            collection=collection,
+        )
 
     def migrate_legacy_scoped_sqlite(self) -> dict[str, Any]:
         """Explicit SQLite migration from legacy ``ledger`` rows to scoped tables."""

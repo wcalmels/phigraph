@@ -122,6 +122,11 @@ def test_json_transaction_commit_and_rollback(json_ledger, tenant_id, project_id
     assert len(ledger.list_scoped("shadow_execution_receipts", tenant_id=tenant_id, project_id=project_id)) == 1
     assert len(ledger.list_scoped("shadow_outcomes", tenant_id=tenant_id, project_id=project_id)) == 1
 
+    rollback_lock_refs = (
+        LockRef(tenant_id, project_id, "shadow_execution_receipts", LockKind.CHAIN),
+        LockRef(tenant_id, project_id, "shadow_execution_receipts", LockKind.CANONICAL, "plan_2"),
+    )
+
     def rollback_fn(session):
         session.append_scoped(
             "shadow_execution_receipts",
@@ -131,7 +136,7 @@ def test_json_transaction_commit_and_rollback(json_ledger, tenant_id, project_id
         raise RuntimeError("abort")
 
     with pytest.raises(RuntimeError):
-        ledger.run_scoped_transaction(tenant_id, project_id, lock_refs, rollback_fn)
+        ledger.run_scoped_transaction(tenant_id, project_id, rollback_lock_refs, rollback_fn)
     assert len(ledger.list_scoped("shadow_execution_receipts", tenant_id=tenant_id, project_id=project_id)) == 1
 
 
