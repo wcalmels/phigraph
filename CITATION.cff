@@ -18,11 +18,11 @@ keywords:
   - shadow-first
 preferred-citation:
   type: article
-  title: "PhiGraph Core 4.0: A Shadow-First Evidence Ledger and Policy-Gated Runtime for Software-Agent Operations"
+  title: "PhiGraph Core 4.1: A Shadow-First Evidence Ledger, Transactional Scoped Storage, and GRDI for Software-Agent Operations"
   authors:
     - family-names: "Calmels von Dem Knesebeck"
       given-names: "Walter"
       affiliation: "TUCH Systems"
-  doi: "10.5281/zenodo.21689514"
-  url: "https://doi.org/10.5281/zenodo.21689514"
+  doi: "10.5281/zenodo.21865341"
+  url: "https://doi.org/10.5281/zenodo.21865341"
   license: "CC-BY-4.0"

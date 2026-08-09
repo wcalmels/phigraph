@@ -1,4 +1,8 @@
-# Zenodo publication folder (v2 draft)
+# Zenodo publication folder (v2 published)
+
+**Version DOI:** [10.5281/zenodo.21865341](https://doi.org/10.5281/zenodo.21865341)  
+**Concept DOI:** [10.5281/zenodo.21689513](https://doi.org/10.5281/zenodo.21689513)  
+**Record:** [zenodo.org/records/21865341](https://zenodo.org/records/21865341)
 
 Ready-to-upload artifacts for a **new version** of [10.5281/zenodo.21689514](https://doi.org/10.5281/zenodo.21689514).
 
@@ -32,6 +36,10 @@ powershell -ExecutionPolicy Bypass -File paper/build.ps1
 Copy-Item paper/main.pdf paper/zenodo/PhiGraph_Paper_v2_draft.pdf -Force
 Copy-Item paper/main.docx paper/zenodo/PhiGraph_Paper_v2_draft.docx -Force
 ```
+
+## Upload (v2)
+
+See [`UPLOAD.md`](UPLOAD.md) for API script or web UI steps.
 
 ## Upload checklist
 
