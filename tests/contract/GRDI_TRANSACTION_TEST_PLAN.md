@@ -1,6 +1,6 @@
 # GRDI transaction contract test plan (design only)
 
-**Status:** draft — no tests implemented (revision 2)
+**Status:** draft — no tests implemented (revision 3)
 **Branch:** `feature/grdi-foundation-1.0-rc`
 **Companion:** ADR-020, `CORE_TRANSACTIONAL_LEDGER_PROTOCOL_V1.md`
 
@@ -18,21 +18,29 @@ API. Tests will live under `tests/contract/` in a later phase.
 | Operation | append, append_once, get, list, CAS (non-GRDI), transaction |
 | Collection | nine GRDI collections including `gateway_decision_events` |
 
+## Backend concurrency expectations
+
+| Backend | Multiprocess contract tests |
+|---|---|
+| JSON | MUST raise `TransactionUnavailable` (not serialize across processes) |
+| SQLite | MUST pass multiprocess idempotency and CAS tests |
+| PostgreSQL | MUST pass two-connection and multinode subset |
+
 ## Matrix: backend × concurrency × operation (P0 subset)
 
 | Operation | JSON single | JSON multi | SQLite multi | PG 2-conn |
 |---|---|---|---|---|
-| `append_scoped_once` receipt | ✓ | ✓ | ✓ | ✓ |
-| `append_scoped_once` outcome | ✓ | ✓ | ✓ | ✓ |
-| `append_scoped_once` replay | ✓ | ✓ | ✓ | ✓ |
-| `append_scoped_once` comparison | ✓ | ✓ | ✓ | ✓ |
-| chain lock: concurrent different keys | ✓ | ✓ | ✓ | ✓ |
-| tx plan + immutable gateway | ✓ | — | ✓ | ✓ |
-| tx receipt + gateway event | ✓ | ✓ | ✓ | ✓ |
-| CAS non-GRDI (VersionConflict) | ✓ | ✓ | ✓ | ✓ |
-| `get_scoped` / `list_scoped` | ✓ | ✓ | ✓ | ✓ |
+| `append_scoped_once` receipt | ✓ | `TransactionUnavailable` | ✓ | ✓ |
+| `append_scoped_once` outcome | ✓ | `TransactionUnavailable` | ✓ | ✓ |
+| `append_scoped_once` replay | ✓ | `TransactionUnavailable` | ✓ | ✓ |
+| `append_scoped_once` comparison | ✓ | `TransactionUnavailable` | ✓ | ✓ |
+| chain lock: concurrent different keys | ✓ | `TransactionUnavailable` | ✓ | ✓ |
+| tx plan + immutable gateway | ✓ | `TransactionUnavailable` | ✓ | ✓ |
+| tx receipt + gateway event | ✓ | `TransactionUnavailable` | ✓ | ✓ |
+| CAS non-GRDI (VersionConflict) | ✓ | `TransactionUnavailable` | ✓ | ✓ |
+| `get_scoped` / `list_scoped` | ✓ | read-only OK | ✓ | ✓ |
 
-Legend: ✓ required for 1.0-RC gate; — optional single-node only.
+Legend: ✓ required for 1.0-RC gate; `TransactionUnavailable` = expected failure on JSON multiprocess.
 
 ## Scenario catalog
 
@@ -45,12 +53,13 @@ Legend: ✓ required for 1.0-RC gate; — optional single-node only.
 ### S2 — Multiprocess thundering herd (canonical key)
 
 - N workers `append_scoped_once` same `(scope, collection, canonical_key)`
-- Exactly **one** row; all workers same payload hash
+- SQLite/PG: exactly **one** row; all workers same payload hash
+- JSON multiprocess: all workers `TransactionUnavailable`
 
 ### S3 — Chain fork prevention (P0)
 
 - N workers append **different** canonical keys same collection concurrently
-- Assert single linear chain: each `chain_prev` equals prior head
+- Assert single linear chain: monotonic `chain_sequence`; each `chain_prev` equals prior head
 - Assert `verify_chain()` valid
 
 ### S4 — Two PostgreSQL connections
@@ -78,7 +87,7 @@ Legend: ✓ required for 1.0-RC gate; — optional single-node only.
 - `run_scoped_transaction` with unsorted `lock_refs` → internal sort matches ADR order
 - No deadlock under paired transactions (timeout guard)
 
-### S9 — CAS VersionConflict (JSON/SQLite and PG)
+### S9 — CAS VersionConflict (SQLite and PG; JSON single-process)
 
 - Two workers CAS same row with same expected version
 - Exactly one `updated=True`; other **`VersionConflict`** (not silent overwrite)
@@ -86,7 +95,7 @@ Legend: ✓ required for 1.0-RC gate; — optional single-node only.
 ### S10 — Gateway append-only simulate
 
 - Simulate twice concurrently
-- One receipt row (`plan_id`); one simulation event (or idempotent event key)
+- One receipt row (`plan_id`); one simulation event keyed `plan_id:SIMULATION_RECORDED`
 - **No** in-place gateway row mutation
 
 ### S11 — Gateway derived view
@@ -123,12 +132,18 @@ Legend: ✓ required for 1.0-RC gate; — optional single-node only.
 
 - Backfill duplicate canonical key with differing payload hash → abort (no DO NOTHING)
 
+### S20 — Post-migration chain head drift
+
+- After scoped cutover, signed replay manifest still verifies
+- `validate_report_against_sources()` MAY return `chain_head_changed`
+- Signature and manifest hash unchanged
+
 ## CI tiers
 
 | Tier | When | Backend |
 |---|---|---|
-| PR fast | every push | json + sqlite multiprocess S2,S3,S9 |
-| RC gate | release branch | + PostgreSQL S2–S11, S14–S16 |
+| PR fast | every push | json single + sqlite multiprocess S2,S3,S9 |
+| RC gate | release branch | + PostgreSQL S2–S11, S14–S16, S20 |
 | Nightly | scheduled | full matrix + load |
 
 ## Load / failure recovery
@@ -139,7 +154,8 @@ Legend: ✓ required for 1.0-RC gate; — optional single-node only.
 
 ## Exit criteria for 1.0-RC
 
-- All P0 matrix cells green on PostgreSQL
+- All P0 matrix cells green on PostgreSQL and SQLite multiprocess
+- JSON multiprocess raises `TransactionUnavailable` per matrix
 - Zero GRDI `_lock`/`_read`/`_write`/`_rechain_payload` in `src/phigraph/grdi`
 - Gateway uses events only; no `update_scoped_record` in GRDI
 - INV-005–INV-009 closed in implementation PR

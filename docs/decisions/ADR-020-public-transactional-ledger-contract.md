@@ -1,6 +1,6 @@
 # ADR-020 — Public transactional ledger contract
 
-**Status:** accepted (documentation revision 2 — implementation not started)
+**Status:** accepted (documentation revision 3 — implementation not started)
 **Date:** 2026-08-08
 **Branch:** `feature/grdi-foundation-1.0-rc`
 **Base:** `main@06df1eb`
@@ -73,7 +73,7 @@ GRDI canonical keys (1.0-RC):
 | `authority_decisions` | `authority_decision_id` | immutable append |
 | `execution_requests` | `plan_id` | immutable append |
 | `gateway_decisions` | `plan_id` | one logical gateway per plan; `gateway_decision_id` is record id only |
-| `gateway_decision_events` | `event_id` | append-only state transitions |
+| `gateway_decision_events` | `plan_id + ":SIMULATION_RECORDED"` | one simulation event per plan; `event_id` is record id only |
 | `shadow_execution_receipts` | `plan_id` | idempotent once |
 | `shadow_outcomes` | `shadow_receipt_id` | idempotent once |
 | `replay_reports` | `manifest_hash` | idempotent once |
@@ -117,26 +117,48 @@ In-place gateway mutation (`update_scoped_record`, CAS, global rechain) is
 4. **`update_scoped_record()` and global `_rechain_payload()` are prohibited** on
    GRDI hot paths.
 5. Simulate transaction = `append_scoped_once(receipt)` +
-   `append_scoped(gateway_decision_events, simulation_event)` atomically.
+   `append_scoped_once(gateway_decision_events, simulation_event,
+   canonical_key=f"{plan_id}:SIMULATION_RECORDED")` atomically.
 
 ### 6. Backend guarantees
 
-#### JSON / SQLite (single-node)
+| Backend | Concurrency | Guarantee |
+|---|---|---|
+| JSON | single-process | Process-wide lock; ACID within one process |
+| JSON | multiprocess | **`TransactionUnavailable`** — process lock is not shared |
+| SQLite | single-node multiprocess | Scoped table + `BEGIN IMMEDIATE`; real SQLite transactions |
+| PostgreSQL | multi-node | Row UNIQUE + advisory locks + persistent chain sequence |
 
-- `run_scoped_transaction` serializes writers with a process-wide lock.
+#### JSON (single-process only)
+
+- `run_scoped_transaction` serializes writers with a **process-wide** lock.
 - All declared lock refs acquired in global order before `fn` runs.
 - `append_scoped_once` is atomic relative to other writers in the same process.
 - **`compare_and_set_scoped`**: writers serialized; exactly one winner; stale caller
   receives `VersionConflict` (never silent last-writer-wins).
-- Guarantees: **single-node ACID**; does **not** claim multi-node safety.
+- Multiprocess callers MUST receive `TransactionUnavailable` (no silent degradation).
+
+#### SQLite (single-node multiprocess)
+
+- **Required for 1.0-RC:** dedicated scoped table (same logical schema as PostgreSQL
+  minus multinode features) — not deferred to a later phase.
+- `run_scoped_transaction` uses **`BEGIN IMMEDIATE`** per transaction.
+- Chain + canonical uniqueness enforced by SQLite constraints within one database file.
+- CAS and idempotent-once semantics match PostgreSQL: one winner, loser gets
+  `VersionConflict` or idempotent read.
+- Does **not** claim multi-node safety.
 
 #### PostgreSQL (multi-node)
 
 - Real `BEGIN … COMMIT` per `run_scoped_transaction`.
 - **Primary guarantee:** `UNIQUE (tenant_id, project_id, collection, canonical_key)`.
 - **Secondary:** `UNIQUE (tenant_id, project_id, collection, record_id)`.
-- **Coordination:** advisory locks for chain sequence + canonical keys (pre-declared).
-- Constraints detect races; advisory locks prevent chain fork and reduce abort churn.
+- **Chain ordering:** each scoped row carries monotonic `chain_sequence BIGINT NOT NULL`
+  with `UNIQUE (tenant_id, project_id, collection, chain_sequence)`.
+- **Chain head assignment:** `phigraph_chain_heads` row per `(tenant, project, collection)`
+  updated under advisory lock — assigns next `chain_sequence` and previous hash (not
+  `created_at` ordering alone).
+- **Coordination:** advisory locks for chain head row + canonical keys (pre-declared).
 
 ### 7. Transaction API — pre-declared locks
 
@@ -215,6 +237,10 @@ only.
 - Payload schema unchanged; PostgreSQL adds columns, indexes, event table.
 - GRDI HTTP API unchanged; persistence semantics strengthen.
 - Signed replay manifests remain valid after migration (no re-sign).
+- **Chain heads may change** during scoped cutover (recomputed links). Historical
+  `ReplayReport` manifests and signatures remain cryptographically valid. Read-path
+  `validate_report_against_sources()` MAY surface `chain_head_changed` when live
+  chain heads differ from frozen manifest context — informational drift, not invalidation.
 
 ### 15. Explicit non-goals
 
@@ -259,6 +285,18 @@ No public ledger API may:
 | Canonical lock only | Allows chain head fork across concurrent appends |
 | Re-sign on key rotation | Mutates hashes and replay manifests |
 | Dynamic locks inside `fn` | Deadlock order not provable |
+
+## Implementation strategy (post-merge)
+
+After this ADR merges to `main` as documentation-only:
+
+1. Branch `feature/core-transactional-ledger-api-v1` from updated `main`.
+2. Implement public transactional API for **JSON + SQLite** first (scoped SQLite table,
+   `BEGIN IMMEDIATE`, single-process JSON guard).
+3. Follow with a separate PR for **PostgreSQL DDL**, migration, and GRDI refactor.
+
+Do not combine architecture docs, all backends, migration, and GRDI service changes in
+one implementation PR.
 
 ## References
 

@@ -1,8 +1,8 @@
 # GRDI Ledger Hardening Inventory
 
-**Branch:** `feature/grdi-foundation-1.0-rc`  
-**Base:** `main@06df1eb`  
-**Date:** 2026-08-08  
+**Branch:** `feature/grdi-foundation-1.0-rc`
+**Base:** `main@06df1eb`
+**Date:** 2026-08-08
 **Scope:** documentation only — no functional changes in this phase
 
 This inventory catalogs every ledger access pattern relevant to GRDI Foundation
@@ -23,7 +23,7 @@ rg -n "register_scoped_record|register_scoped_record_once|update_scoped_record|r
 | `authority_decisions` | `authority_decision_id` | no | append only; global dup check | P0 |
 | `execution_requests` | `plan_id` | no | append only; global dup check | P0 |
 | `gateway_decisions` | `plan_id` | append once (immutable) | in-process | P0 duplicate / forked chain |
-| `gateway_decision_events` | `event_id` | append-only transitions | none today | P0 missing event model |
+| `gateway_decision_events` | `plan_id + ":SIMULATION_RECORDED"` | append-only transitions | none today | P0 missing event model |
 | `shadow_execution_receipts` | `plan_id` | `register_scoped_record_once` | in-process scan by scope | P0 race → duplicate receipt |
 | `shadow_outcomes` | `shadow_receipt_id` | `register_scoped_record_once` | in-process scan by scope | P0 race → duplicate outcome |
 | `replay_reports` | `manifest_hash` | `register_scoped_record_once` | in-process scan by scope | P0 race → duplicate replay |
@@ -289,7 +289,7 @@ These remain acceptable in tests until contract tests provide sanctioned mutatio
 | Business invariant | Canonical key field | Idempotency mechanism today | Target constraint |
 |---|---|---|---|
 | one gateway per plan | `plan_id` | append once (no idempotency today) | UNIQUE(scope, gateway_decisions, plan_id) |
-| simulation recorded | `event_id` / derived | none (in-place update today) | append `gateway_decision_events` |
+| simulation recorded | `plan_id + ":SIMULATION_RECORDED"` | none (in-place update today) | `append_scoped_once` on `gateway_decision_events` |
 | one receipt per plan | `plan_id` | `register_scoped_record_once` | UNIQUE(scope, collection, plan_id) |
 | one outcome per receipt | `shadow_receipt_id` | `register_scoped_record_once` | UNIQUE(scope, collection, shadow_receipt_id) |
 | one replay per manifest | `manifest_hash` | `register_scoped_record_once` | UNIQUE(scope, collection, manifest_hash) |
@@ -312,6 +312,18 @@ These remain acceptable in tests until contract tests provide sanctioned mutatio
 | Corrupt replay baselines | Catch ValueError, KeyError, TypeError; skip invalid |
 | Key rotation | Verify with keyring; never re-sign historical records |
 | JSON/SQLite CAS | Serialize; loser gets VersionConflict |
+| Backend concurrency | JSON single-process; SQLite single-node multiprocess; PG multinode |
+
+---
+
+## Backend guarantee matrix (1.0-RC)
+
+| Backend | Concurrency | Guarantee |
+|---|---|---|
+| JSON | single-process only | Process-wide lock; ACID within one process |
+| JSON | multiprocess | `TransactionUnavailable` — no cross-process lock |
+| SQLite | single-node multiprocess | Scoped table + `BEGIN IMMEDIATE`; real SQLite transactions |
+| PostgreSQL | multi-node | Row UNIQUE + advisory locks + `phigraph_chain_heads` sequence |
 
 ---
 

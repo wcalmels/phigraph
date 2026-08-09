@@ -1,6 +1,6 @@
 # Core Transactional Ledger Protocol v1.0 (proposed)
 
-**Status:** draft — design only (revision 2)
+**Status:** draft — design only (revision 3)
 **Branch:** `feature/grdi-foundation-1.0-rc`
 **Companion:** ADR-020
 
@@ -168,11 +168,12 @@ include this ref explicitly in `lock_refs` (sorted before canonical refs).
 4. Commit or rollback as a unit.
 
 ```python
+simulation_event_key = f"{plan_id}:SIMULATION_RECORDED"
 lock_refs = (
     LockRef(tenant, project, "shadow_execution_receipts", LockKind.CHAIN),
     LockRef(tenant, project, "shadow_execution_receipts", LockKind.CANONICAL, plan_id),
     LockRef(tenant, project, "gateway_decision_events", LockKind.CHAIN),
-    LockRef(tenant, project, "gateway_decision_events", LockKind.CANONICAL, event_id),
+    LockRef(tenant, project, "gateway_decision_events", LockKind.CANONICAL, simulation_event_key),
 )
 run_scoped_transaction(tenant, project, lock_refs, fn)
 ```
@@ -190,11 +191,12 @@ run_scoped_transaction(tenant, project, lock_refs, fn)
 
 ### Concurrency
 
-| Scenario | JSON/SQLite | PostgreSQL |
-|---|---|---|
-| Two workers `append_scoped_once` same canonical key | serialized; one row | one row; second idempotent |
-| Two workers append **different** keys same collection | chain lock serializes chain_prev | no chain fork |
-| Two workers CAS same row | one winner; other `VersionConflict` | one winner; other `VersionConflict` |
+| Scenario | JSON | SQLite | PostgreSQL |
+|---|---|---|---|
+| Two workers `append_scoped_once` same canonical key | serialized (same process) | one row via SQLite tx | one row; second idempotent |
+| Two workers append **different** keys same collection | chain lock serializes chain_prev | chain lock + `chain_sequence` | no chain fork |
+| Two workers CAS same row | one winner; other `VersionConflict` | one winner; other `VersionConflict` | one winner; other `VersionConflict` |
+| Multiprocess on JSON backend | **`TransactionUnavailable`** | N/A (use SQLite) | N/A |
 
 ### Crash timing
 
@@ -213,11 +215,11 @@ run_scoped_transaction(tenant, project, lock_refs, fn)
 
 ### Backend capability
 
-| Backend | Claim |
-|---|---|
-| JSON | single-node only |
-| SQLite | single-node durable |
-| PostgreSQL | multi-node with UNIQUE + advisory locks |
+| Backend | Concurrency | Claim |
+|---|---|---|
+| JSON | single-process | ACID within process; multiprocess → `TransactionUnavailable` |
+| SQLite | single-node multiprocess | Scoped table + `BEGIN IMMEDIATE`; CAS and once semantics enforced |
+| PostgreSQL | multi-node | UNIQUE constraints + advisory locks + `phigraph_chain_heads` sequence |
 
 ### Chain validation
 
@@ -247,7 +249,7 @@ run_scoped_transaction(tenant, project, lock_refs, fn)
 | GRDI method | Transaction pattern |
 |---|---|
 | `create_execution_plan` | tx: append request + append immutable gateway (`plan_id` key) |
-| `simulate_execution_plan` | tx: once receipt (`plan_id`) + append gateway simulation event |
+| `simulate_execution_plan` | tx: once receipt (`plan_id`) + once gateway event (`plan_id:SIMULATION_RECORDED`) |
 | `record_shadow_outcome` | once outcome by `shadow_receipt_id` |
 | `create_replay_report` | once replay by `manifest_hash` |
 | `compare_replays` | once comparison by `comparison_key` |
@@ -256,12 +258,22 @@ run_scoped_transaction(tenant, project, lock_refs, fn)
 ## Gateway derived state
 
 ```text
+simulation_event_key = f"{plan_id}:SIMULATION_RECORDED"
+
 gateway_view(plan_id) =
   merge( get_scoped("gateway_decisions", plan_id),
-         latest_event("gateway_decision_events", plan_id, event_type) )
+         get_scoped("gateway_decision_events", simulation_event_key) )
 ```
 
-Latest event selected by deterministic ordering (`created_at`, `event_id`).
+The simulation transition canonical key is **mandatory** — not optional. Exactly one
+`SIMULATION_RECORDED` event per plan; `event_id` remains the stable `record_id`.
+
+### Post-cutover chain head drift (replay)
+
+Scoped migration may recompute `chain_prev` / `chain_hash` / `chain_sequence`. Signed
+`ReplayReport` manifests remain valid. `validate_report_against_sources()` MAY return
+`chain_head_changed` when live heads differ from manifest `source_chain_heads` — audit
+signal only, not signature invalidation.
 
 ## Non-execution invariant
 
