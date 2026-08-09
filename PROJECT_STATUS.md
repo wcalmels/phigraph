@@ -1,21 +1,22 @@
 # PhiGraph Project Status
 
-**Last updated:** 2026-08-08
-**Branch:** `feature/grdi-replay-audit-v1`
-**Release target:** 4.1.0-rc.5 → 4.1.0 stable
+**Last updated:** 2026-08-09
+**Branch:** `feature/core-transactional-ledger-api-v1`
+**Release target:** 4.1.0-rc.6 → 4.1.0 stable
 
 ## Executive summary
 
-PhiGraph Core **4.1.0-rc.5** adds GRDI Replay Audit v0.4 on top of the shadow
-Outcome Ledger. Operators can reconstruct, verify, and compare the persisted
-shadow chain without re-simulation, execution, or external side effects.
+PhiGraph Core **4.1.0-rc.6** implements the ADR-020 public transactional ledger API
+for JSON (single-process) and SQLite (single-node multiprocess). GRDI continues on
+legacy scoped methods until a follow-up refactor PR.
 
 ## Current versions
 
 | Artifact | Version |
 |----------|---------|
-| Core | 4.1.0-rc.5 (development candidate) |
+| Core | 4.1.0-rc.6 (development candidate) |
 | GRDI | 0.4.0 (Replay Audit) |
+| Transactional Ledger protocol | 0.1.0 (implementation candidate) |
 | Replay Audit protocol | 0.1.0 |
 | Outcome Ledger protocol | 0.1.0 |
 | HAV | 0.2.0 |
@@ -24,35 +25,25 @@ shadow chain without re-simulation, execution, or external side effects.
 
 ## Completed (this branch)
 
-- [x] Replay engine with manifest reconstruction and fail-closed validation
-- [x] Signed `ReplayReport` and `HistoricalComparison` records
-- [x] `replay_reports` and `historical_comparisons` ledger collections
-- [x] `/v4/grdi/.../replays` and replay comparison API
-- [x] RBAC permissions `grdi:replay` and `grdi:compare`
-- [x] Adversarial tests for tampering, scope, drift, idempotency, and concurrency
-- [x] ADR-019, replay protocol, conformance report, release notes
+- [x] Public transactional API on `EvidenceLedger` (JSON + SQLite)
+- [x] SQLite scoped tables + `BEGIN IMMEDIATE` transactions
+- [x] Explicit legacy SQLite migration (`migrate_legacy_scoped_sqlite`)
+- [x] 19 contract tests including multiprocess SQLite
+- [x] ADR-020 JSON/SQLite marked IMPLEMENTED
+- [x] Conformance report and release notes
 
 ## In progress
 
-- [ ] GRDI Foundation 1.0-RC consolidation
-- [ ] PostgreSQL / multi-node transactional hardening
-- [ ] Real connector phase (separate milestone)
-
-## Chain
-
-```text
-DecisionEnvelope → AuthorityDecision → ShadowExecutionReceipt
-→ ShadowOutcomeRecord → ReplayReport/HistoricalComparison
-```
-
-Replay reconstructs and verifies history. It never re-simulates or executes.
+- [ ] GRDI service refactor to public transactional API
+- [ ] PostgreSQL scoped DDL + migration
+- [ ] `gateway_decision_events` append-only model
 
 ## Test status
 
-- **257** automated tests passing locally
+- **287** automated tests passing locally
 
 ## Known limitations
 
-- Replay/comparison idempotency is in-process; multi-node requires future backend constraints.
-- PostgreSQL not validated against a live instance in local runs.
-- Replay reports structural differences only; no semantic causality inference.
+- GRDI still uses private ledger internals (`_lock`, legacy scoped methods)
+- PostgreSQL scoped backend not implemented
+- JSON backend rejects multiprocess mode explicitly

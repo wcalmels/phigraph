@@ -1,5 +1,13 @@
 # Changelog
 
+## 4.1.0-rc.6 - 2026-08-09 (development candidate)
+
+- Implemented ADR-020 public transactional ledger API on JSON and SQLite backends.
+- Added scoped append/get/list, compare-and-set, and `run_scoped_transaction` on `EvidenceLedger`.
+- Added SQLite scoped tables with `chain_sequence` and explicit legacy migration helper.
+- Added 19 contract tests; preserved 262 baseline tests and legacy ledger API.
+- GRDI service unchanged; PostgreSQL scoped backend deferred.
+
 ## 4.1.0-rc.5 - 2026-08-08 (development candidate)
 
 - Added deterministic GRDI Replay Audit engine over the persisted shadow chain.
