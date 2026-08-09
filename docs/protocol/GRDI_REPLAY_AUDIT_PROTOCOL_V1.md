@@ -42,7 +42,14 @@ GRDI shadow records without re-simulation or execution.
 | `NOT_COMPARABLE` | Distinct decision identity (subject/domain/decision_type). |
 | `INVALID` | Either replay report or signature is invalid. |
 
-## Persistence
+## ReplayManifest fields
+
+| Field | Purpose |
+|-------|---------|
+| `record_hashes` | Canonical hashes of chain records without `_chain` |
+| `decision_identity` | Frozen subject/domain/decision_type at replay time |
+| `outcome_snapshot` | Minimal signed outcome view (e.g. `outcome_state`) |
+| `source_chain_heads` | Audited global chain context; excluded from `manifest_hash` |
 
 Collections:
 

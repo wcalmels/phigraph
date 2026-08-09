@@ -360,10 +360,22 @@ class ReplayManifest:
     record_hashes: dict[str, str]
     policy_versions: dict[str, str]
     protocol_versions: dict[str, str]
+    decision_identity: dict[str, str]
+    outcome_snapshot: dict[str, Any]
     source_chain_heads: dict[str, str | None]
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
+
+    @classmethod
+    def from_dict(cls, row: dict[str, Any]) -> "ReplayManifest":
+        clean = dict(row)
+        clean.setdefault(
+            "decision_identity",
+            {"subject": "", "domain": "", "decision_type": ""},
+        )
+        clean.setdefault("outcome_snapshot", {})
+        return cls(**clean)
 
 
 @dataclass(frozen=True)
@@ -405,7 +417,7 @@ class ReplayReport:
     @classmethod
     def from_dict(cls, row: dict[str, Any]) -> "ReplayReport":
         clean = {key: value for key, value in row.items() if key not in {"_chain", "scope"}}
-        clean["manifest"] = ReplayManifest(**clean["manifest"])
+        clean["manifest"] = ReplayManifest.from_dict(clean["manifest"])
         clean["validation_results"] = tuple(clean.get("validation_results", ()))
         clean["drift_reasons"] = tuple(clean.get("drift_reasons", ()))
         clean["replay_state"] = ReplayState(clean["replay_state"])

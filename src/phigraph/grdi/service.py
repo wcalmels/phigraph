@@ -392,7 +392,7 @@ class GRDIService:
                 project_id=project_id,
             )
             stored = ReplayReport.from_dict(stored_row)
-            return self.replay.validate_report(stored).to_dict()
+            return self.replay.validate_report(stored, verify_sources=False).to_dict()
 
     def get_replay_report(self, replay_id: str, *, tenant_id: str, project_id: str) -> dict[str, Any]:
         row = self._get_replay_row(replay_id, tenant_id=tenant_id, project_id=project_id)
@@ -406,7 +406,7 @@ class GRDIService:
             if row.get("plan_id") != plan_id:
                 continue
             report = ReplayReport.from_dict(row)
-            results.append(self.replay.validate_report(report).to_dict())
+            results.append(self.replay.validate_report(report, verify_sources=True).to_dict())
         return results
 
     def compare_replays(

@@ -547,5 +547,204 @@ def test_manifest_hash_helper_matches_report(tmp_path):
         project_id="project-a",
         requested_by="auditor-a",
     )
-    manifest = ReplayManifest(**replay["manifest"])
+    manifest = ReplayManifest.from_dict(replay["manifest"])
     assert manifest_hash(manifest) == replay["manifest_hash"]
+
+
+def test_package_metadata_matches_core_version():
+    from pathlib import Path
+
+    from phigraph.version import CORE_VERSION
+
+    pyproject = Path(__file__).resolve().parents[1] / "pyproject.toml"
+    assert f'version = "{CORE_VERSION}"' in pyproject.read_text(encoding="utf-8")
+
+
+def test_source_drift_detected_on_read(tmp_path):
+    core, grdi, _, _, plan, outcome = _full_chain(tmp_path)
+    replay = grdi.create_replay_report(
+        plan["plan_id"],
+        tenant_id="tenant-a",
+        project_id="project-a",
+        requested_by="auditor-a",
+    )
+    row = core.ledger.query("shadow_outcomes", tenant_id="tenant-a", project_id="project-a", limit=100000)[0]
+    signed = dict(row["signed_outcome"])
+    signed["metrics"] = {"latency_ms": 42}
+    assert core.receipt_signer is not None
+    resigned = core.receipt_signer.sign({key: value for key, value in signed.items() if key != "signature"})
+    _mutate_ledger_row(
+        core,
+        "shadow_outcomes",
+        "outcome_id",
+        outcome["outcome_id"],
+        {"metrics": {"latency_ms": 42}, "signed_outcome": resigned},
+        tenant_id="tenant-a",
+        project_id="project-a",
+    )
+    with pytest.raises(ValueError, match="replay_source_drift"):
+        grdi.get_replay_report(replay["replay_id"], tenant_id="tenant-a", project_id="project-a")
+
+
+def test_comparison_remains_deterministic_after_source_mutation(tmp_path):
+    core, grdi, envelope, decision, plan, _ = _full_chain(tmp_path)
+    baseline = grdi.create_replay_report(
+        plan["plan_id"],
+        tenant_id="tenant-a",
+        project_id="project-a",
+        requested_by="auditor-a",
+    )
+    other_plan = grdi.create_execution_plan(
+        **_plan_body(envelope, decision),
+        tenant_id="tenant-a",
+        project_id="project-a",
+        requested_by="operator-a",
+    )
+    grdi.simulate_execution_plan(other_plan["plan_id"], tenant_id="tenant-a", project_id="project-a")
+    from phigraph.grdi.models import EffectAssessment, EffectAssessmentState
+
+    grdi.record_shadow_outcome(
+        other_plan["plan_id"],
+        tenant_id="tenant-a",
+        project_id="project-a",
+        recorded_by="human-verifier",
+        effect_assessments=(
+            EffectAssessment(
+                "staging promotion recorded",
+                "unexpected rollback signal",
+                EffectAssessmentState.DEVIATED,
+            ),
+        ),
+    )
+    candidate = grdi.create_replay_report(
+        other_plan["plan_id"],
+        tenant_id="tenant-a",
+        project_id="project-a",
+        requested_by="auditor-a",
+    )
+    comparison = grdi.compare_replays(
+        baseline["replay_id"],
+        candidate["replay_id"],
+        tenant_id="tenant-a",
+        project_id="project-a",
+        requested_by="auditor-a",
+    )
+    _mutate_ledger_row(
+        core,
+        "decision_envelopes",
+        "envelope_id",
+        envelope.envelope_id,
+        {"subject": "mutated-subject@candidate"},
+        tenant_id="tenant-a",
+        project_id="project-a",
+    )
+    stored = grdi.get_historical_comparison(
+        comparison["comparison_id"],
+        tenant_id="tenant-a",
+        project_id="project-a",
+    )
+    assert stored["comparison_state"] == ComparisonState.DIFFERENT.value
+    assert stored["outcome_differences"] == comparison["outcome_differences"]
+
+
+def test_manipulated_prior_replay_not_used_as_baseline(tmp_path):
+    core, grdi, _, _, plan, outcome = _full_chain(tmp_path)
+    first = grdi.create_replay_report(
+        plan["plan_id"],
+        tenant_id="tenant-a",
+        project_id="project-a",
+        requested_by="auditor-a",
+    )
+    row = core.ledger.query("shadow_outcomes", tenant_id="tenant-a", project_id="project-a", limit=100000)[0]
+    signed = dict(row["signed_outcome"])
+    signed["metrics"] = {"latency_ms": 11}
+    assert core.receipt_signer is not None
+    resigned = core.receipt_signer.sign({key: value for key, value in signed.items() if key != "signature"})
+    _mutate_ledger_row(
+        core,
+        "shadow_outcomes",
+        "outcome_id",
+        outcome["outcome_id"],
+        {"metrics": {"latency_ms": 11}, "signed_outcome": resigned},
+        tenant_id="tenant-a",
+        project_id="project-a",
+    )
+    second = grdi.create_replay_report(
+        plan["plan_id"],
+        tenant_id="tenant-a",
+        project_id="project-a",
+        requested_by="auditor-a",
+    )
+    assert second["replay_state"] == ReplayState.DRIFTED.value
+    _mutate_ledger_row(
+        core,
+        "replay_reports",
+        "replay_id",
+        first["replay_id"],
+        {"replay_state": ReplayState.INVALID.value},
+        tenant_id="tenant-a",
+        project_id="project-a",
+    )
+    signed_metrics = dict(row["signed_outcome"])
+    signed_metrics["metrics"] = {"latency_ms": 22}
+    resigned_again = core.receipt_signer.sign(
+        {key: value for key, value in signed_metrics.items() if key != "signature"}
+    )
+    _mutate_ledger_row(
+        core,
+        "shadow_outcomes",
+        "outcome_id",
+        outcome["outcome_id"],
+        {"metrics": {"latency_ms": 22}, "signed_outcome": resigned_again},
+        tenant_id="tenant-a",
+        project_id="project-a",
+    )
+    third = grdi.create_replay_report(
+        plan["plan_id"],
+        tenant_id="tenant-a",
+        project_id="project-a",
+        requested_by="auditor-a",
+    )
+    assert third["replay_state"] == ReplayState.DRIFTED.value
+    assert any("prior_replay_invalid" in reason for reason in third["drift_reasons"])
+    assert third["manifest_hash"] != second["manifest_hash"]
+
+
+def test_unrelated_plan_does_not_change_snapshot_identity(tmp_path):
+    _, grdi, envelope, decision, plan, _ = _full_chain(tmp_path)
+    first = grdi.create_replay_report(
+        plan["plan_id"],
+        tenant_id="tenant-a",
+        project_id="project-a",
+        requested_by="auditor-a",
+    )
+    other_envelope = grdi.register_envelope(_envelope(grdi.core.receipt_signer, subject="other@candidate"))
+    other_decision = grdi.authorize(
+        other_envelope.envelope_id,
+        tenant_id="tenant-a",
+        project_id="project-a",
+        authority_subject="human-verifier",
+        authority_role="verifier",
+    )
+    other_plan = grdi.create_execution_plan(
+        **_plan_body(other_envelope, other_decision),
+        tenant_id="tenant-a",
+        project_id="project-a",
+        requested_by="operator-a",
+    )
+    grdi.simulate_execution_plan(other_plan["plan_id"], tenant_id="tenant-a", project_id="project-a")
+    _record_outcome(grdi, other_plan["plan_id"])
+    grdi.create_replay_report(
+        other_plan["plan_id"],
+        tenant_id="tenant-a",
+        project_id="project-a",
+        requested_by="auditor-a",
+    )
+    second = grdi.create_replay_report(
+        plan["plan_id"],
+        tenant_id="tenant-a",
+        project_id="project-a",
+        requested_by="auditor-a",
+    )
+    assert second["manifest_hash"] == first["manifest_hash"]
+    assert second["replay_id"] == first["replay_id"]

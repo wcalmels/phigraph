@@ -25,7 +25,7 @@ engine over the persisted GRDI shadow chain without re-simulation or execution.
 
 ## Verification
 
-- Baseline suite preserved: **257** tests passed (228 baseline + 29 replay tests)
+- Baseline suite preserved: **262** tests passed (228 baseline + 34 replay tests)
 - focal Ruff, Bandit, build, wheel and Docker checks expected green in CI
 
 ## Explicit limitations

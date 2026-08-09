@@ -55,12 +55,19 @@ def record_hash(row: dict[str, Any]) -> str:
     return EvidenceLedger.hash_payload(canonical_record(row))
 
 
+def manifest_snapshot_payload(manifest: ReplayManifest) -> dict[str, Any]:
+    """Canonical snapshot identity excluding mutable global chain-head context."""
+    payload = manifest.to_dict()
+    payload.pop("source_chain_heads", None)
+    return payload
+
+
 def manifest_canonical(manifest: ReplayManifest) -> dict[str, Any]:
-    return manifest.to_dict()
+    return manifest_snapshot_payload(manifest)
 
 
 def manifest_hash(manifest: ReplayManifest) -> str:
-    return EvidenceLedger.hash_payload(manifest_canonical(manifest))
+    return EvidenceLedger.hash_payload(manifest_snapshot_payload(manifest))
 
 
 def comparison_key(
@@ -158,7 +165,58 @@ class ReplayEngine:
             created_at=draft.created_at,
         )
 
-    def validate_report(self, report: ReplayReport) -> ReplayReport:
+    def validate_report(self, report: ReplayReport, *, verify_sources: bool = True) -> ReplayReport:
+        self._validate_report_historical(report)
+        if verify_sources:
+            drifts = self.validate_report_against_sources(report)
+            if drifts:
+                raise ValueError(f"replay_source_drift:{';'.join(drifts)}")
+        return report
+
+    def validate_report_against_sources(self, report: ReplayReport) -> list[str]:
+        """Compare signed manifest hashes against the current scoped ledger."""
+        drifts: list[str] = []
+        rows = self._load_chain_rows(
+            report.plan_id,
+            tenant_id=report.tenant_id,
+            project_id=report.project_id,
+        )
+        for label in RECORD_HASH_KEYS:
+            expected = report.manifest.record_hashes.get(label)
+            source = rows.get(label)
+            if expected is None and source is None:
+                continue
+            if source is None:
+                drifts.append(f"source_missing:{label}")
+                continue
+            current = record_hash(source)
+            if expected != current:
+                drifts.append(f"source_hash_mismatch:{label}")
+
+        chain = self.core.ledger.verify_chain()
+        if not chain.get("valid"):
+            drifts.append(f"source_chain_invalid:{chain.get('reason')}:{chain.get('collection')}")
+        else:
+            heads = chain.get("heads", {})
+            for collection, head in report.manifest.source_chain_heads.items():
+                if head != heads.get(collection):
+                    drifts.append(f"chain_head_changed:{collection}")
+
+        envelope = rows.get("decision_envelope")
+        if envelope and report.manifest.decision_identity:
+            current_identity = self._extract_decision_identity(envelope)
+            if current_identity != report.manifest.decision_identity:
+                drifts.append("source_identity_mismatch")
+
+        outcome = rows.get("shadow_outcome")
+        if outcome and report.manifest.outcome_snapshot:
+            current_snapshot = self._extract_outcome_snapshot(outcome)
+            if current_snapshot != report.manifest.outcome_snapshot:
+                drifts.append("source_outcome_snapshot_mismatch")
+
+        return drifts
+
+    def _validate_report_historical(self, report: ReplayReport) -> None:
         if self.core.receipt_signer is None:
             raise ValueError("receipt_signer_not_configured")
         signed = report.signed_replay
@@ -189,7 +247,6 @@ class ReplayEngine:
         self._require_execution_invariants(report, signed)
         if manifest_hash(report.manifest) != report.manifest_hash:
             raise ValueError("replay_manifest_hash_recompute_mismatch")
-        return report
 
     def compare_reports(
         self,
@@ -198,8 +255,8 @@ class ReplayEngine:
         *,
         requested_by: str,
     ) -> HistoricalComparison:
-        baseline = self.validate_report(baseline)
-        candidate = self.validate_report(candidate)
+        baseline = self.validate_report(baseline, verify_sources=False)
+        candidate = self.validate_report(candidate, verify_sources=False)
         comparison_state, structural, hash_diffs, policy_diffs, outcome_diffs = self._compare_pair(baseline, candidate)
         key = comparison_key(baseline.replay_id, candidate.replay_id)
         draft = HistoricalComparison.create(
@@ -499,6 +556,12 @@ class ReplayEngine:
             collection: heads.get(collection)
             for collection in GRDI_CHAIN_COLLECTIONS
         }
+        decision_identity = self._extract_decision_identity(envelope) if envelope else {
+            "subject": "",
+            "domain": "",
+            "decision_type": "",
+        }
+        outcome_snapshot = self._extract_outcome_snapshot(outcome) if outcome else {}
 
         return ReplayManifest(
             envelope_id=str(envelope.get("envelope_id", request.get("envelope_id", ""))),
@@ -514,6 +577,8 @@ class ReplayEngine:
             record_hashes=record_hashes,
             policy_versions=policy_versions,
             protocol_versions=protocol_versions,
+            decision_identity=decision_identity,
+            outcome_snapshot=outcome_snapshot,
             source_chain_heads=source_chain_heads,
         )
 
@@ -533,29 +598,58 @@ class ReplayEngine:
         if any(item.get("status") == "incomplete" for item in validation_results):
             return ReplayState.INCOMPLETE
 
-        prior = self._list_prior_reports(plan_id, tenant_id=tenant_id, project_id=project_id)
-        matching = [item for item in prior if item.get("manifest_hash") == manifest_hash_value]
+        prior_valid, skipped = self._validated_prior_reports(plan_id, tenant_id=tenant_id, project_id=project_id)
+        drift_reasons.extend(skipped)
+
+        matching = [item for item in prior_valid if item.manifest_hash == manifest_hash_value]
         if matching:
             return ReplayState.REPRODUCED
 
-        if prior:
-            reference = prior[-1]
-            reference_manifest = reference.get("manifest", {})
+        if prior_valid:
+            reference = prior_valid[-1]
+            reference_manifest = reference.manifest
             for key, value in manifest.record_hashes.items():
-                baseline = reference_manifest.get("record_hashes", {}).get(key)
+                baseline = reference_manifest.record_hashes.get(key)
                 if baseline != value:
                     drift_reasons.append(f"record_hash_changed:{key}")
             for key, value in manifest.policy_versions.items():
-                baseline = reference_manifest.get("policy_versions", {}).get(key)
+                baseline = reference_manifest.policy_versions.get(key)
                 if baseline != value:
                     drift_reasons.append(f"policy_version_changed:{key}")
             for key, value in manifest.protocol_versions.items():
-                baseline = reference_manifest.get("protocol_versions", {}).get(key)
+                baseline = reference_manifest.protocol_versions.get(key)
                 if baseline != value:
                     drift_reasons.append(f"protocol_version_changed:{key}")
-            return ReplayState.DRIFTED
+            for key, value in manifest.decision_identity.items():
+                baseline = reference_manifest.decision_identity.get(key)
+                if baseline != value:
+                    drift_reasons.append(f"decision_identity_changed:{key}")
+            for key, value in manifest.outcome_snapshot.items():
+                baseline = reference_manifest.outcome_snapshot.get(key)
+                if baseline != value:
+                    drift_reasons.append(f"outcome_snapshot_changed:{key}")
+            if drift_reasons:
+                return ReplayState.DRIFTED
 
         return ReplayState.REPRODUCED
+
+    def _validated_prior_reports(
+        self,
+        plan_id: str,
+        *,
+        tenant_id: str,
+        project_id: str,
+    ) -> tuple[list[ReplayReport], list[str]]:
+        prior_valid: list[ReplayReport] = []
+        skipped: list[str] = []
+        for row in self._list_prior_reports(plan_id, tenant_id=tenant_id, project_id=project_id):
+            try:
+                report = ReplayReport.from_dict(row)
+                self._validate_report_historical(report)
+                prior_valid.append(report)
+            except ValueError as exc:
+                skipped.append(f"prior_replay_invalid:{row.get('replay_id')}:{exc}")
+        return prior_valid, skipped
 
     def _list_prior_reports(self, plan_id: str, *, tenant_id: str, project_id: str) -> list[dict[str, Any]]:
         rows = self.core.ledger.query("replay_reports", tenant_id=tenant_id, project_id=project_id, limit=100000)
@@ -581,8 +675,16 @@ class ReplayEngine:
         if baseline.tenant_id != candidate.tenant_id or baseline.project_id != candidate.project_id:
             return ComparisonState.INVALID, (), (), (), ()
 
-        baseline_identity = self._decision_identity(baseline.manifest)
-        candidate_identity = self._decision_identity(candidate.manifest)
+        baseline_identity = (
+            baseline.manifest.decision_identity.get("subject", ""),
+            baseline.manifest.decision_identity.get("domain", ""),
+            baseline.manifest.decision_identity.get("decision_type", ""),
+        )
+        candidate_identity = (
+            candidate.manifest.decision_identity.get("subject", ""),
+            candidate.manifest.decision_identity.get("domain", ""),
+            candidate.manifest.decision_identity.get("decision_type", ""),
+        )
         if baseline_identity != candidate_identity:
             return ComparisonState.NOT_COMPARABLE, (), (), (), ()
 
@@ -614,9 +716,9 @@ class ReplayEngine:
             if base_value != cand_value:
                 structural.append({"path": f"manifest.{field}", "baseline": base_value, "candidate": cand_value})
 
-        baseline_outcome = self._outcome_snapshot(baseline)
-        candidate_outcome = self._outcome_snapshot(candidate)
-        for field in ("outcome_state",):
+        baseline_outcome = baseline.manifest.outcome_snapshot
+        candidate_outcome = candidate.manifest.outcome_snapshot
+        for field in sorted(set(baseline_outcome) | set(candidate_outcome)):
             if baseline_outcome.get(field) != candidate_outcome.get(field):
                 outcome_diffs.append(
                     {
@@ -637,33 +739,17 @@ class ReplayEngine:
 
         return ComparisonState.DIFFERENT, tuple(structural), tuple(hash_diffs), tuple(policy_diffs), tuple(outcome_diffs)
 
-    def _decision_identity(self, manifest: ReplayManifest) -> tuple[str, str, str]:
-        row = self._find_row(
-            "decision_envelopes",
-            "envelope_id",
-            manifest.envelope_id,
-            manifest.tenant_id,
-            manifest.project_id,
-            required=False,
-        )
-        if row is None:
-            return ("", "", "")
-        return (str(row.get("subject", "")), str(row.get("domain", "")), str(row.get("decision_type", "")))
+    @staticmethod
+    def _extract_decision_identity(envelope: dict[str, Any]) -> dict[str, str]:
+        return {
+            "subject": str(envelope.get("subject", "")),
+            "domain": str(envelope.get("domain", "")),
+            "decision_type": str(envelope.get("decision_type", "")),
+        }
 
-    def _outcome_snapshot(self, report: ReplayReport) -> dict[str, Any]:
-        if not report.manifest.outcome_id:
-            return {}
-        row = self._find_row(
-            "shadow_outcomes",
-            "outcome_id",
-            report.manifest.outcome_id,
-            report.tenant_id,
-            report.project_id,
-            required=False,
-        )
-        if row is None:
-            return {}
-        return {"outcome_state": row.get("outcome_state")}
+    @staticmethod
+    def _extract_outcome_snapshot(outcome: dict[str, Any]) -> dict[str, Any]:
+        return {"outcome_state": outcome.get("outcome_state", "")}
 
     @staticmethod
     def _signed_replay_body(report: ReplayReport) -> dict[str, Any]:
