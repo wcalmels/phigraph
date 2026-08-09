@@ -1,14 +1,14 @@
 # GRDI 1.0-RC PostgreSQL migration plan (design only)
 
-**Status:** draft — no SQL executed in this phase  
-**Branch:** `feature/grdi-foundation-1.0-rc`  
+**Status:** draft — no SQL executed (revision 2)
+**Branch:** `feature/grdi-foundation-1.0-rc`
 **Base:** `main@06df1eb`
 
 ## Objective
 
 Move from full-snapshot `write_all` semantics to row-level scoped records with
-database-enforced canonical uniqueness for GRDI collections, while preserving
-compatibility with JSON/SQLite single-node deployments.
+database-enforced canonical uniqueness and chain-safe appends, while preserving
+RC1–RC5 payload compatibility.
 
 ## Target schema (PostgreSQL)
 
@@ -29,144 +29,151 @@ CREATE TABLE phigraph_scoped_ledger (
     signing_key_id  TEXT,
     created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    PRIMARY KEY (tenant_id, project_id, collection, canonical_key)
+    PRIMARY KEY (tenant_id, project_id, collection, canonical_key),
+    CONSTRAINT uq_scoped_record_id
+        UNIQUE (tenant_id, project_id, collection, record_id)
 );
-
-CREATE UNIQUE INDEX uq_scoped_record_id
-    ON phigraph_scoped_ledger (collection, record_id);
 
 CREATE INDEX idx_scoped_collection_scope
     ON phigraph_scoped_ledger (tenant_id, project_id, collection, created_at);
 
-CREATE INDEX idx_scoped_plan_lookup
-    ON phigraph_scoped_ledger (tenant_id, project_id, collection, canonical_key)
-    WHERE collection IN (
-        'execution_requests',
-        'shadow_execution_receipts',
-        'shadow_outcomes',
-        'replay_reports'
-    );
+CREATE INDEX idx_gateway_by_plan
+    ON phigraph_scoped_ledger (tenant_id, project_id, canonical_key)
+    WHERE collection = 'gateway_decisions';
+
+CREATE INDEX idx_gateway_events_by_plan
+    ON phigraph_scoped_ledger (tenant_id, project_id, (payload->>'plan_id'), created_at)
+    WHERE collection = 'gateway_decision_events';
 ```
 
-### Legacy table handling
+**Note:** Legacy `phigraph_core_ledger PRIMARY KEY (collection, record_id)` is
+insufficient — it ignores tenant/project scope.
 
-- Existing `phigraph_core_ledger` remains during transition.
-- Migration copies GRDI collections into `phigraph_scoped_ledger`.
-- Core non-GRDI collections may stay on legacy table until Core 1.0 consolidation.
+### Table: `phigraph_gateway_decision_events` (logical collection)
+
+Stored in `phigraph_scoped_ledger` with `collection = 'gateway_decision_events'`.
+Event payload MUST include:
+
+```json
+{
+  "event_id": "gwe_…",
+  "plan_id": "ep_…",
+  "gateway_decision_id": "gd_…",
+  "event_type": "SIMULATION_RECORDED",
+  "simulation_state": "SIMULATED",
+  "execution_state": "NOT_EXECUTED",
+  "policy_id": "…",
+  "policy_version": "…",
+  "recorded_at": "…"
+}
+```
+
+Canonical key = `event_id`. Idempotency for simulate: optional
+`append_scoped_once` on derived key `plan_id + ':SIMULATION_RECORDED'` if exactly
+one simulation event per plan is required.
 
 ## Canonical key backfill rules
 
-| Collection | canonical_key source | record_id source |
+| Collection | canonical_key | record_id |
 |---|---|---|
 | `decision_envelopes` | `envelope_id` | `envelope_id` |
 | `authority_decisions` | `authority_decision_id` | `authority_decision_id` |
 | `execution_requests` | `plan_id` | `plan_id` |
-| `gateway_decisions` | `gateway_decision_id` | `gateway_decision_id` |
+| `gateway_decisions` | `plan_id` | `gateway_decision_id` |
+| `gateway_decision_events` | new rows from legacy gateway updates | `event_id` |
 | `shadow_execution_receipts` | `plan_id` | `receipt_id` |
 | `shadow_outcomes` | `shadow_receipt_id` | `outcome_id` |
 | `replay_reports` | `manifest_hash` | `replay_id` |
 | `historical_comparisons` | `comparison_key` | `comparison_id` |
 
-`payload_hash` = SHA-256 of canonical JSON (exclude `_chain`, include `scope`).
+### Gateway migration transform
+
+For each legacy `gateway_decisions` row where `simulation_state != NOT_SIMULATED`:
+
+1. Insert immutable gateway row keyed by `plan_id` (initial eligibility snapshot).
+2. Append synthetic `gateway_decision_events` row capturing simulation transition.
+3. Do **not** mutate original payload in place.
+
+`payload_hash` = SHA-256 of canonical JSON (exclude `_chain`; include `scope`).
 
 ## Pre-migration duplicate detection
 
-Run read-only audit on each backend:
-
-```text
-GROUP BY tenant_id, project_id, collection, canonical_key HAVING COUNT(*) > 1
+```sql
+SELECT tenant_id, project_id, collection, canonical_key, COUNT(*)
+FROM legacy_export
+GROUP BY 1,2,3,4
+HAVING COUNT(*) > 1;
 ```
 
-If duplicates exist:
+Any duplicate **aborts** migration. Operator resolves manually.
 
-1. Stop migration.
-2. Export conflicting rows.
-3. Operator resolves manually (GRDI forbids silent merge).
-4. Document resolution in migration log.
+## Backfill rules (strict)
 
-Collections most at risk today: `shadow_execution_receipts`, `shadow_outcomes`,
-`replay_reports` under concurrent tests simulating multi-node without constraints.
+**Forbidden:** `INSERT … ON CONFLICT DO NOTHING`.
 
-## Migration steps
+For each legacy row:
+
+1. Compute `canonical_key`, `payload_hash`, chain fields.
+2. If scoped key absent → INSERT.
+3. If scoped key present → require **exact** `payload_hash` match or **ABORT**.
+4. Log every insert and hash-verified skip.
+
+## Migration phases
 
 ### Phase A — prepare (online)
 
-1. **Mandatory backup** of ledger files / PostgreSQL dump.
-2. Deploy application version that can **read both** schemas (dual-read flag).
-3. Apply DDL creating `phigraph_scoped_ledger` (empty).
+1. Mandatory backup (files + `pg_dump`).
+2. Deploy dual-read capable application (feature flag).
+3. Apply DDL (empty new tables).
 
-### Phase B — backfill (maintenance window recommended)
+### Phase B — backfill (maintenance window)
 
-1. Open transaction per tenant/project batch.
-2. For each legacy row in GRDI collections:
-   - compute `canonical_key`, `payload_hash`, chain fields
-   - `INSERT … ON CONFLICT DO NOTHING`
-   - count skipped vs inserted
-3. Verify row counts match legacy scoped counts.
-4. Run `verify_chain()` equivalent on new table.
+1. Batch by `(tenant_id, project_id)`.
+2. Strict insert per rules above.
+3. Emit gateway events from legacy mutable fields.
+4. Row-count and hash audit vs legacy export.
 
-### Phase C — cutover
+### Phase C — verifiable cutover (no silent data-loss rollback)
 
-1. Enable dual-write to new table (feature flag).
-2. Run smoke + contract tests on PostgreSQL.
-3. Disable legacy writes for GRDI collections.
-4. Monitor `DuplicateCanonicalKey` rates (should be near zero).
+1. Enable **dual-write** (legacy + scoped) under feature flag.
+2. Background verifier compares row counts and payload hashes per scope.
+3. **Write fence:** reject new legacy writes for GRDI collections when verifier green.
+4. Switch reads to scoped table.
+5. Disable legacy GRDI writes.
+
+Cutover is **forward-only** after write fence — not reversible without restore from
+backup. No claim of non-lossy rollback post-fence.
 
 ### Phase D — cleanup (post-RC)
 
-1. Archive legacy GRDI rows.
-2. Remove snapshot code paths for GRDI collections.
-
-## Rollback
-
-| Stage | Rollback action |
-|---|---|
-| After DDL only | drop new table; no app change |
-| After backfill, before cutover | truncate new table; continue legacy |
-| After cutover | restore backup; revert flag; **data loss** if new writes not back-synced |
-
-Rollback requires restored backup — forward-only migration is not guaranteed after cutover.
+1. Archive legacy GRDI rows (read-only).
+2. Remove snapshot write paths for GRDI collections.
 
 ## Post-migration validation
 
-- [ ] Row counts per collection match pre-migration audit
-- [ ] No duplicate `(tenant, project, collection, canonical_key)`
-- [ ] `verify_chain` valid for each collection
-- [ ] GRDI integration tests green on PostgreSQL
-- [ ] Multiprocess contract tests green (two connections)
-- [ ] Replay/comparison idempotency tests green
-- [ ] Wheel smoke + Docker unchanged
+- [ ] Row counts per `(scope, collection)` match audit
+- [ ] Zero duplicate canonical keys
+- [ ] `verify_chain` valid per collection
+- [ ] Gateway views match legacy derived state sample
+- [ ] GRDI + contract tests green on PostgreSQL
+- [ ] Multiprocess idempotency tests green
 
 ## JSON / SQLite compatibility
 
-JSON and SQLite **do not** receive DDL. They implement the same public Python API with:
+Same public Python API; chain + canonical locks under process mutex.
+Documented **single-node-only**. No DDL required for JSON; optional SQLite
+scoped table in later phase.
 
-- process-local lock
-- optional SQLite table mirroring `phigraph_scoped_ledger` columns in future
-- documented **single-node-only** guarantee
+## Signing key rotation (design only — no re-sign)
 
-Existing JSON ledger files load without migration; canonical keys enforced in software until optional SQLite schema upgrade.
+1. Config keyring: `{key_id: secret}` with `active_key_id`.
+2. New rows include `signing_key_id = active_key_id`.
+3. Verifier accepts active + retired keys.
+4. **Historical rows never modified.**
+5. Asymmetric keys evaluated before stable 1.0 — out of RC scope.
 
-## RC1–RC5 payload compatibility
+## Open implementation questions
 
-- No field removals from GRDI records.
-- `scope` embedded in payload preserved.
-- `_chain` either stored in columns (`chain_prev`, `chain_hash`) or embedded until chain refactor.
-- Signed replay manifests unchanged — migration is storage-layer only.
-
-## Signing key rotation strategy (design only)
-
-Not implemented in this phase.
-
-1. Add `signing_key_id` column and config `PHIGRAPH_SIGNING_KEYS` (id → secret).
-2. New records signed with active key id.
-3. Verification accepts active + retired keys during grace window.
-4. Re-sign job (admin CLI) optional for long-lived records — **not** automatic on read.
-5. Rotation does not alter canonical keys or manifest hashes.
-
-## Open questions
-
-1. Dual-table period length and feature flag naming.
-2. Whether gateway updates become append-only state events vs CAS in place.
-3. Maximum batch size for tenant/project backfill.
-4. Whether SQLite gains scoped table or keeps snapshot with stricter software checks.
+1. Dual-write verifier SLA and alert thresholds.
+2. Feature flag names and operator runbook.
+3. Maximum backfill batch size.

@@ -22,7 +22,8 @@ rg -n "register_scoped_record|register_scoped_record_once|update_scoped_record|r
 | `decision_envelopes` | `envelope_id` | no | append only; global dup check in `_append` | P0 duplicate / lost write |
 | `authority_decisions` | `authority_decision_id` | no | append only; global dup check | P0 |
 | `execution_requests` | `plan_id` | no | append only; global dup check | P0 |
-| `gateway_decisions` | `gateway_decision_id` | no | append + `update_scoped_record` | P0 TOCTOU on simulate |
+| `gateway_decisions` | `plan_id` | append once (immutable) | in-process | P0 duplicate / forked chain |
+| `gateway_decision_events` | `event_id` | append-only transitions | none today | P0 missing event model |
 | `shadow_execution_receipts` | `plan_id` | `register_scoped_record_once` | in-process scan by scope | P0 race → duplicate receipt |
 | `shadow_outcomes` | `shadow_receipt_id` | `register_scoped_record_once` | in-process scan by scope | P0 race → duplicate outcome |
 | `replay_reports` | `manifest_hash` | `register_scoped_record_once` | in-process scan by scope | P0 race → duplicate replay |
@@ -84,12 +85,12 @@ rg -n "register_scoped_record|register_scoped_record_once|update_scoped_record|r
 |---|---|
 | File / function | `src/phigraph/grdi/service.py` → `create_execution_plan` |
 | Collection | `gateway_decisions` |
-| Operation | append |
-| Uniqueness key | `gateway_decision_id` |
+| Operation | append (initial immutable row) |
+| Uniqueness key | **`plan_id`** (canonical); `gateway_decision_id` is record id only |
 | Scope | tenant/project |
-| Linked key | `plan_id` (1:1 with execution request) |
-| Multiprocess/multinode risk | **P0** — orphan gateway or orphan request |
-| Proposed API | same transaction as INV-003 |
+| Linked key | 1:1 with `execution_requests.plan_id` |
+| Multiprocess/multinode risk | **P0** — orphan gateway or orphan request without cross-collection tx |
+| Proposed API | `run_scoped_transaction`: append request + append gateway (`plan_id` key) |
 | Priority | **P0** |
 
 ### INV-005 — `GRDIService.simulate_execution_plan`
@@ -97,19 +98,18 @@ rg -n "register_scoped_record|register_scoped_record_once|update_scoped_record|r
 | Field | Value |
 |---|---|
 | File / function | `src/phigraph/grdi/service.py` → `simulate_execution_plan` |
-| Collections | `shadow_execution_receipts`, `gateway_decisions` |
-| Operation | read-check-write + `register_scoped_record_once` + `update_scoped_record` |
-| Uniqueness key | `plan_id` (receipt), `gateway_decision_id` (update) |
+| Collections | `shadow_execution_receipts`, `gateway_decision_events` (target) |
+| Operation | read-check-write + `register_scoped_record_once` + legacy `update_scoped_record` |
+| Uniqueness key | `plan_id` (receipt); simulation event per plan |
 | Scope | tenant/project |
-| Current atomicity | outer `with self.core.ledger._lock` + inner ledger methods each re-acquire lock and re-read full payload |
-| JSON | single process safe; multiprocess **unsafe** |
-| SQLite | full snapshot rewrite; last writer wins |
-| PostgreSQL | scoped snapshot DELETE/INSERT; concurrent nodes can interleave |
-| Multiprocess/multinode risk | **P0** — duplicate shadow receipts; gateway state race |
-| Proposed API | `run_scoped_transaction` with `append_scoped_once(plan_id)` + `compare_and_set_scoped(gateway)` |
+| Current atomicity | outer `with self.core.ledger._lock` + in-place gateway mutation |
+| Multiprocess/multinode risk | **P0** — duplicate receipts; forked chain without collection chain lock |
+| Proposed API | tx with chain locks: once receipt + append `gateway_decision_events` |
 | Priority | **P0** |
 
 **Private ledger access:** `with self.core.ledger._lock` (line ~176)
+
+**Legacy defect:** `update_scoped_record` on `gateway_decisions` — **removed in 1.0-RC**.
 
 ### INV-006 — `GRDIService.record_shadow_outcome`
 
@@ -159,19 +159,16 @@ rg -n "register_scoped_record|register_scoped_record_once|update_scoped_record|r
 
 **Private ledger access:** `with self.core.ledger._lock` (line ~421)
 
-### INV-009 — `GRDIService._persist_gateway_state`
+### INV-009 — `GRDIService._persist_gateway_state` (legacy — to remove)
 
 | Field | Value |
 |---|---|
 | File / function | `src/phigraph/grdi/service.py` → `_persist_gateway_state` |
-| Collection | `gateway_decisions` |
-| Operation | `update_scoped_record` → in-place replace + `_rechain_payload` |
-| Uniqueness key | `gateway_decision_id` |
-| Scope | tenant/project |
-| Current atomicity | read-modify-write full ledger snapshot |
-| Multiprocess/multinode risk | **P1** — simulation_state update lost under concurrency |
-| Proposed API | `compare_and_set_scoped(..., expected_version=...)` |
-| Priority | **P1** |
+| Collection | `gateway_decisions` (today) |
+| Operation | **`update_scoped_record`** + global `_rechain_payload` |
+| Multiprocess/multinode risk | **P0** — mutates immutable evidence; chain rechain cost |
+| Proposed API | **`append_scoped` on `gateway_decision_events`** inside simulate transaction |
+| Priority | **P0** (remove before 1.0-RC) |
 
 ### INV-010 — `ReplayEngine.build_report` / `validate_report_against_sources`
 
@@ -220,15 +217,15 @@ rg -n "register_scoped_record|register_scoped_record_once|update_scoped_record|r
 | Proposed API | `append_scoped_once` backed by UNIQUE constraint + advisory lock |
 | Priority | **P0** |
 
-### INV-014 — `EvidenceLedger.update_scoped_record` (implementation)
+### INV-014 — `EvidenceLedger.update_scoped_record` (legacy)
 
 | Field | Value |
 |---|---|
 | File / function | `src/phigraph/core_v3/ledger.py` → `update_scoped_record` |
 | Operation | in-place mutation + `_rechain_payload` entire ledger |
-| Multiprocess/multinode risk | **P1** — expensive; concurrent updates lose last write |
-| Proposed API | `compare_and_set_scoped` with row version |
-| Priority | **P1** |
+| GRDI 1.0-RC | **prohibited** on GRDI paths; gateway uses append-only events |
+| Proposed API | not exposed to GRDI; Core mutable rows only if ever required |
+| Priority | **P0** removal from GRDI |
 
 ### INV-015 — `EvidenceLedger.repair_chain`
 
@@ -257,10 +254,21 @@ rg -n "register_scoped_record|register_scoped_record_once|update_scoped_record|r
 | Field | Value |
 |---|---|
 | File | `src/phigraph/core_v3/auth_deps.py`, `src/phigraph/grdi/api.py` |
-| Operation | HTTP `Idempotency-Key` dedupes **responses**, not ledger canonical keys |
-| Risk | **P1** — retried requests with new keys bypass ledger idempotency |
-| Proposed API | align HTTP idempotency key with `canonical_key` where applicable |
-| Priority | **P1** |
+| Operation | HTTP `Idempotency-Key` dedupes **HTTP responses** |
+| Canonical key | separate layer — identifies persisted entity |
+| Risk | **P1** if conflated with ledger keys |
+| Resolution | keep layers separate per ADR-020 §10 |
+| Priority | **P1** documentation + tests |
+
+### INV-018 — Chain head fork without collection lock
+
+| Field | Value |
+|---|---|
+| Location | `register_scoped_record_once`, `_append` in `ledger.py` |
+| Issue | concurrent appends with different canonical keys read same `chain_prev` |
+| Multiprocess/multinode risk | **P0** — bifurcated `_chain` |
+| Proposed API | chain `LockRef` before every append (ADR-020 §4) |
+| Priority | **P0** |
 
 ---
 
@@ -280,23 +288,30 @@ These remain acceptable in tests until contract tests provide sanctioned mutatio
 
 | Business invariant | Canonical key field | Idempotency mechanism today | Target constraint |
 |---|---|---|---|
+| one gateway per plan | `plan_id` | append once (no idempotency today) | UNIQUE(scope, gateway_decisions, plan_id) |
+| simulation recorded | `event_id` / derived | none (in-place update today) | append `gateway_decision_events` |
 | one receipt per plan | `plan_id` | `register_scoped_record_once` | UNIQUE(scope, collection, plan_id) |
 | one outcome per receipt | `shadow_receipt_id` | `register_scoped_record_once` | UNIQUE(scope, collection, shadow_receipt_id) |
 | one replay per manifest | `manifest_hash` | `register_scoped_record_once` | UNIQUE(scope, collection, manifest_hash) |
 | one comparison per pair | `comparison_key` | `register_scoped_record_once` | UNIQUE(scope, collection, comparison_key) |
-| HTTP replay create | `Idempotency-Key` + payload | Core idempotency store | align with manifest build inputs |
+| HTTP replay create | `Idempotency-Key` + payload | Core HTTP cache | ledger `manifest_hash` via `append_scoped_once` |
 
 ---
 
-## Open decisions (for ADR-020 review)
+## Resolved decisions (ADR-020 review 2026-08-08)
 
-1. **Global vs scoped duplicate check in `_append`** — current behavior blocks same `plan_id` across tenants; intentional or bug?
-2. **Cross-collection transactions** — plan creation and simulate require atomic multi-collection writes.
-3. **`update_scoped_record` vs append-only** — gateway updates mutate history; 1.0-RC may require append-only state transitions with version pointers.
-4. **Chain repair** — remain admin/migration only; never GRDI read/replay path.
-5. **PostgreSQL PK today** — `(collection, record_id)` does not enforce business canonical keys.
-6. **Advisory lock namespace** — derive from `(tenant_id, project_id, collection, canonical_key)` hash.
-7. **Prior replay baseline validation** — extend `_validated_prior_reports` to catch `KeyError`/`TypeError` (future hardening, noted in RC5 review).
+| Topic | Resolution |
+|---|---|
+| `_append` global dup check | Legacy defect; scoped uniqueness in new API |
+| Cross-collection tx | Required: plan+gateway, receipt+gateway-event |
+| Gateway mutation | Append-only events; no `update_scoped_record` in GRDI |
+| Gateway canonical key | **`plan_id`** (not `gateway_decision_id`) |
+| Chain serialization | Collection chain lock before `chain_prev` |
+| PostgreSQL PK | `(tenant, project, collection, canonical_key)` + scoped `record_id` |
+| HTTP idempotency | Separate from canonical entity key |
+| Corrupt replay baselines | Catch ValueError, KeyError, TypeError; skip invalid |
+| Key rotation | Verify with keyring; never re-sign historical records |
+| JSON/SQLite CAS | Serialize; loser gets VersionConflict |
 
 ---
 
@@ -304,6 +319,6 @@ These remain acceptable in tests until contract tests provide sanctioned mutatio
 
 | Priority | Count | Theme |
 |---|---|---|
-| **P0** | 12 | idempotent once operations, simulate/outcome/replay/compare races, PostgreSQL uniqueness |
-| **P1** | 6 | gateway update, torn reads, idempotency alignment, repair governance |
+| **P0** | 14 | chain lock, gateway events, idempotent once, cross-collection tx |
+| **P1** | 5 | torn reads, HTTP idempotency docs, repair governance |
 | **P2** | 1 | query scan performance |

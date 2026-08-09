@@ -1,7 +1,7 @@
 # GRDI transaction contract test plan (design only)
 
-**Status:** draft — no tests implemented in this phase  
-**Branch:** `feature/grdi-foundation-1.0-rc`  
+**Status:** draft — no tests implemented (revision 2)
+**Branch:** `feature/grdi-foundation-1.0-rc`
 **Companion:** ADR-020, `CORE_TRANSACTIONAL_LEDGER_PROTOCOL_V1.md`
 
 ## Purpose
@@ -15,23 +15,24 @@ API. Tests will live under `tests/contract/` in a later phase.
 |---|---|
 | Backend | `json`, `sqlite`, `postgresql` |
 | Concurrency | single process, multiprocess (N=8), two PG connections |
-| Operation | `append_scoped`, `append_scoped_once`, `get_scoped`, `list_scoped`, `compare_and_set_scoped`, `run_scoped_transaction` |
-| Collection | all eight GRDI collections (minimum P0 subset for CI) |
+| Operation | append, append_once, get, list, CAS (non-GRDI), transaction |
+| Collection | nine GRDI collections including `gateway_decision_events` |
 
 ## Matrix: backend × concurrency × operation (P0 subset)
 
-| Operation | JSON single | JSON multi | SQLite single | SQLite multi | PG 2-conn |
-|---|---|---|---|---|---|
-| `append_scoped_once` receipt | ✓ | ✓ | ✓ | ✓ | ✓ |
-| `append_scoped_once` outcome | ✓ | ✓ | ✓ | ✓ | ✓ |
-| `append_scoped_once` replay | ✓ | ✓ | ✓ | ✓ | ✓ |
-| `append_scoped_once` comparison | ✓ | ✓ | ✓ | ✓ | ✓ |
-| `run_scoped_transaction` plan pair | ✓ | — | ✓ | ✓ | ✓ |
-| `run_scoped_transaction` simulate | ✓ | ✓ | ✓ | ✓ | ✓ |
-| `compare_and_set_scoped` gateway | ✓ | ✓ | ✓ | ✓ | ✓ |
-| `get_scoped` / `list_scoped` | ✓ | ✓ | ✓ | ✓ | ✓ |
+| Operation | JSON single | JSON multi | SQLite multi | PG 2-conn |
+|---|---|---|---|---|
+| `append_scoped_once` receipt | ✓ | ✓ | ✓ | ✓ |
+| `append_scoped_once` outcome | ✓ | ✓ | ✓ | ✓ |
+| `append_scoped_once` replay | ✓ | ✓ | ✓ | ✓ |
+| `append_scoped_once` comparison | ✓ | ✓ | ✓ | ✓ |
+| chain lock: concurrent different keys | ✓ | ✓ | ✓ | ✓ |
+| tx plan + immutable gateway | ✓ | — | ✓ | ✓ |
+| tx receipt + gateway event | ✓ | ✓ | ✓ | ✓ |
+| CAS non-GRDI (VersionConflict) | ✓ | ✓ | ✓ | ✓ |
+| `get_scoped` / `list_scoped` | ✓ | ✓ | ✓ | ✓ |
 
-Legend: ✓ required for 1.0-RC gate; — optional / expected single-node only.
+Legend: ✓ required for 1.0-RC gate; — optional single-node only.
 
 ## Scenario catalog
 
@@ -41,112 +42,108 @@ Legend: ✓ required for 1.0-RC gate; — optional / expected single-node only.
 - Second append same key → `created=False`, identical record
 - Assert canonical row count = 1
 
-### S2 — Multiprocess thundering herd
+### S2 — Multiprocess thundering herd (canonical key)
 
-- N workers call `append_scoped_once` same `(scope, collection, canonical_key)`
-- Assert exactly **one** row in store
-- Assert all workers receive same `record_id` / payload hash
+- N workers `append_scoped_once` same `(scope, collection, canonical_key)`
+- Exactly **one** row; all workers same payload hash
 
-### S3 — Two PostgreSQL connections
+### S3 — Chain fork prevention (P0)
 
-- Connection A begins transaction, append once (uncommitted)
-- Connection B append same key → blocks or receives existing after A commit
-- Assert no duplicate key in table
+- N workers append **different** canonical keys same collection concurrently
+- Assert single linear chain: each `chain_prev` equals prior head
+- Assert `verify_chain()` valid
 
-### S4 — Rollback on exception
+### S4 — Two PostgreSQL connections
 
-- `run_scoped_transaction` appends plan + raises before gateway append
-- Assert zero new rows visible after rollback
+- Connection A uncommitted append; B same key blocks or idempotent after commit
+- No duplicate scoped rows
 
-### S5 — Crash between insert and response (simulated)
+### S5 — Transaction rollback
 
-- Insert row in transaction, commit, simulate client timeout, retry
-- Retry must be idempotent (`created=False`)
+- Tx appends plan + raises before gateway append
+- Zero rows visible after rollback
 
 ### S6 — Same key, different payload
 
-- Worker A creates key K with payload P1
-- Worker B attempts K with P2
-- Assert `DuplicateCanonicalKey`; P1 preserved
+- Worker B attempts existing key with different hash
+- `DuplicateCanonicalKey`; original preserved
 
-### S7 — Cross-tenant isolation
+### S7 — Cross-tenant / cross-project isolation
 
-- Same `canonical_key` value under tenant A and tenant B
-- Both succeed; queries never cross scopes
+- Same canonical string under different scope → independent rows
+- Queries never cross scopes
 
-### S8 — Cross-project isolation
+### S8 — Pre-declared lock ordering
 
-- Same tenant, different `project_id`
-- Independent rows
+- `run_scoped_transaction` with unsorted `lock_refs` → internal sort matches ADR order
+- No deadlock under paired transactions (timeout guard)
 
-### S9 — Deadlock avoidance
+### S9 — CAS VersionConflict (JSON/SQLite and PG)
 
-- Transaction 1: lock (tenant, project, collection_a, key_a) then (collection_b, key_b)
-- Transaction 2: reverse order using **wrong** order → potential deadlock
-- With mandated lock ordering, both complete without hang (timeout guard in test)
+- Two workers CAS same row with same expected version
+- Exactly one `updated=True`; other **`VersionConflict`** (not silent overwrite)
 
-### S10 — Version conflict (gateway CAS)
+### S10 — Gateway append-only simulate
 
-- Read gateway version V
-- Concurrent update to V+1
-- Stale CAS with expected V → `VersionConflict`
+- Simulate twice concurrently
+- One receipt row (`plan_id`); one simulation event (or idempotent event key)
+- **No** in-place gateway row mutation
 
-### S11 — Key rotation read (future)
+### S11 — Gateway derived view
 
-- Record signed with `key_id=old`
-- Verify with `{old, new}` key ring succeeds
-- Verify with only `new` fails until re-sign
+- Initial gateway + simulation event → derived `simulation_state == SIMULATED`
+- Matches legacy behavior sample vectors
 
-### S12 — Ledger chain validation
+### S12 — Key rotation verify (no re-sign)
 
-- Append valid rows → `verify_chain()` success
-- Tamper row without rechain → `LedgerIntegrityError`
-- Assert **no** auto-repair invoked
+- Record signed with retired `key_id` verifies via keyring
+- Payload hash unchanged after rotation config update
 
-### S13 — GRDI simulate idempotency (integration)
+### S13 — Chain validation without repair
 
-- Full GRDI simulate path on PostgreSQL, 8 workers
-- Exactly one `shadow_execution_receipts` row per `plan_id`
+- Tamper row → `LedgerIntegrityError` on guarded read
+- Assert repair not invoked
 
-### S14 — GRDI outcome idempotency (integration)
+### S14–S16 — GRDI integration idempotency
 
-- 8 workers `record_shadow_outcome` same receipt
-- Exactly one outcome row
+- Parallel simulate / outcome / replay / comparison on PostgreSQL
+- Exactly one row per canonical key
 
-### S15 — GRDI replay/comparison idempotency (integration)
+### S17 — Source drift regression
 
-- Parallel replay same plan → one `manifest_hash` row
-- Parallel comparison → one `comparison_key` row
+- Replay + comparison then mutate source row
+- Read replay → `replay_source_drift`; comparison unchanged
 
-### S16 — Source drift vs historical comparison (regression)
+### S18 — Corrupt prior replay baseline
 
-- Create replay + comparison
-- Mutate underlying outcome in DB directly (test helper)
-- `get_replay_report` → `replay_source_drift`
-- `get_historical_comparison` → unchanged signed snapshot
+- Inject structurally invalid prior replay row (malformed manifest)
+- New replay classifies `prior_replay_invalid` from KeyError/TypeError/ValueError
+
+### S19 — Migration hash conflict
+
+- Backfill duplicate canonical key with differing payload hash → abort (no DO NOTHING)
 
 ## CI tiers
 
 | Tier | When | Backend |
 |---|---|---|
-| PR fast | every push | json + sqlite multiprocess |
-| RC gate | release branch | + PostgreSQL service container, S3, S13–S15 |
-| Nightly | scheduled | full matrix + load soak |
+| PR fast | every push | json + sqlite multiprocess S2,S3,S9 |
+| RC gate | release branch | + PostgreSQL S2–S11, S14–S16 |
+| Nightly | scheduled | full matrix + load |
 
-## Load / failure recovery (design)
+## Load / failure recovery
 
-- **Load:** 1000 idempotent appends/sec on hot key → at most one row; measure advisory lock wait time.
-- **Recovery:** kill -9 worker mid-transaction; verify DB consistent, no orphan partial plan.
-- **Backup restore:** restore dump, rerun post-migration validation checklist.
+- Hot key idempotent storm: ≤1 row; measure chain lock wait
+- kill -9 mid-transaction: no partial cross-collection state
+- Post-cutover: verifier hash match legacy vs scoped (dual-write phase)
 
 ## Exit criteria for 1.0-RC
 
-- All P0 matrix cells green on PostgreSQL.
-- Zero GRDI references to `_lock`, `_read`, `_write`, `_rechain_payload` in `src/phigraph/grdi`.
-- Inventory items INV-005 through INV-008 marked closed in follow-up PR.
+- All P0 matrix cells green on PostgreSQL
+- Zero GRDI `_lock`/`_read`/`_write`/`_rechain_payload` in `src/phigraph/grdi`
+- Gateway uses events only; no `update_scoped_record` in GRDI
+- INV-005–INV-009 closed in implementation PR
 
 ## Out of scope
 
-- Real connector dispatch tests
-- External execution tests
-- Webhook delivery tests
+- Real connectors, external execution, webhooks
