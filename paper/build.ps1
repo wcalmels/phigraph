@@ -19,6 +19,9 @@ if (Test-Path "$PSScriptRoot/zenodo") {
   Copy-Item "$PSScriptRoot/main.tex" "$PSScriptRoot/zenodo/" -Force
   Copy-Item "$PSScriptRoot/references.bib" "$PSScriptRoot/zenodo/" -Force
   Copy-Item "$PSScriptRoot/LICENSE.md" "$PSScriptRoot/zenodo/" -Force
+  if (Test-Path "$PSScriptRoot/zenodo_metadata.json") {
+    Copy-Item "$PSScriptRoot/zenodo_metadata.json" "$PSScriptRoot/zenodo/" -Force
+  }
   Write-Host "Synced paper/zenodo/ publish folder"
 }
 Pop-Location

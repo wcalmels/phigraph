@@ -11,7 +11,7 @@ Ready-to-upload artifacts for a **new version** of [10.5281/zenodo.21689514](htt
 | `main.tex` | LaTeX source |
 | `references.bib` | Bibliography |
 | `LICENSE.md` | CC BY 4.0 |
-| `zenodo_metadata.json` | Metadata helper (update title/abstract before upload) |
+| `zenodo_metadata.json` | Metadata helper (v2 title, keywords, git pin `a5a7187`) |
 
 ## What changed in this draft
 
@@ -36,5 +36,5 @@ Copy-Item paper/main.docx paper/zenodo/PhiGraph_Paper_v2_draft.docx -Force
 
 1. Open Zenodo → existing record → **New version**
 2. Upload files from this folder
-3. Update title/description/keywords (see `paper/PAPER_V2_OUTLINE.md`)
+3. Paste title/description/keywords from `zenodo_metadata.json` (or upload the JSON as supplementary)
 4. Publish version → update root `README.md` / `CITATION.cff` if metadata changes

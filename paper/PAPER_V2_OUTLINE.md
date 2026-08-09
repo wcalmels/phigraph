@@ -3,7 +3,7 @@
 **Branch:** `docs/paper-v2`  
 **Base software:** `main@a5a7187` (Core 4.1.0-rc.6, GRDI 0.4.0)  
 **Prior deposit:** Zenodo v1 — [10.5281/zenodo.21689514](https://doi.org/10.5281/zenodo.21689514)  
-**Working title (draft):** *PhiGraph Core 4.1: Governed Relational Decision Intelligence with a Transactional Evidence Ledger*
+**Working title (v2 draft):** *PhiGraph Core 4.1: A Shadow-First Evidence Ledger, Transactional Scoped Storage, and GRDI for Software-Agent Operations*
 
 ---
 

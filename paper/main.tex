@@ -20,11 +20,11 @@
   linkcolor=blue!50!black,
   citecolor=blue!50!black,
   urlcolor=blue!60!black,
-  pdftitle={PhiGraph Core 4.0: A Shadow-First Evidence Ledger and Policy-Gated Runtime for Software-Agent Operations},
+  pdftitle={PhiGraph Core 4.1: Shadow-First Evidence Ledger, Transactional Scoped Storage, and GRDI},
   pdfauthor={Walter Calmels von Dem Knesebeck}
 }
 
-\title{\textbf{PhiGraph Core 4.0: A Shadow-First Evidence Ledger and Policy-Gated Runtime for Software-Agent Operations}}
+\title{\textbf{PhiGraph Core 4.1: A Shadow-First Evidence Ledger,\\Transactional Scoped Storage, and GRDI for Software-Agent Operations}}
 \author{
   Walter Calmels von Dem Knesebeck\\
   TUCH Systems, Santiago, Chile\\
@@ -38,37 +38,38 @@
 \begin{abstract}
 Software agents and artificial-intelligence systems can produce claims,
 recommendations, and action proposals faster than organizations can verify and
-govern them. This paper presents PhiGraph Core 4.0.0, an MIT-licensed,
+govern them. This paper presents PhiGraph Core~4.1.0-rc.6, an MIT-licensed,
 model-agnostic system that treats model output as a proposal rather than as
 verified truth. PhiGraph represents claims, evidence, verifications, action
 proposals, policy decisions, and outcomes as linked records; stores them in a
 scope-tagged, tamper-evident ledger; and places policy evaluation between agent
-proposals and operational execution. Replay and shadow modes cannot execute
-external actions, while higher-authority modes require both an explicit
-executor and an allowing policy decision. We describe the protocol, runtime,
-ledger, deployment boundaries, and Python implementation. Core~4.1 adds a
-scoped transactional ledger with declared write locks and fail-closed chain
-verification for JSON and SQLite backends. Building on this substrate, we
-additionally describe PhiGraph HAV v0.2, a fail-closed
-verification layer that extracts claims from agent-generated text, checks them
-against an explicitly supplied authoritative state, and records the resulting
-claims, evidence, verifications, and policy decisions in the same ledger.
-Engineering verification comprises 128 automated tests (117 core tests and 11
-HAV-specific tests); the continuous-integration configuration targets Python
-3.10--3.13. An initial external experiment on the CIC-IDS2017
-Friday DDoS flow file compares a PhiGraph relational score with three
-unsupervised baselines. Local Outlier Factor is strongest on this tabular
-benchmark; PhiGraph ranks second by PR-AUC and attains 0.840 precision at a
-10\% alert budget. The experiment demonstrates functional integration, not
-state-of-the-art superiority: it uses a single imperfect dataset, a
-feature-similarity graph, and one fixed split. PhiGraph is therefore presented
-as an auditable governance substrate and research prototype, not as a proof of
-correctness, causal identification, or safe autonomous operation.
+proposals and operational execution. Core~4.1 adds a scoped transactional
+ledger with declared write locks, append-only GRDI hash chains, mutable Core
+compare-and-set collections, and fail-closed \texttt{verify\_scoped\_chain}
+for JSON and SQLite backends. Governed Relational Decision Intelligence
+(GRDI)~0.4.0 extends the stack with a persisted shadow decision chain---from
+decision envelopes and authority through simulated gateway receipts, outcomes,
+and deterministic replay audit---without external execution in the current
+release. We additionally describe PhiGraph HAV~v0.2, a fail-closed verification
+layer that checks agent-generated text against an explicitly supplied
+authoritative state. Replay and shadow modes cannot execute external actions,
+while higher-authority modes require both an explicit executor and an allowing
+policy decision. Engineering verification comprises 319 automated tests on
+\texttt{main@a5a7187} (262 baseline, 57 scoped transactional contract, and 11
+HAV-specific tests); continuous integration targets Python~3.10--3.13. An
+initial external experiment on the CIC-IDS2017 Friday DDoS flow file compares a
+PhiGraph relational score with three unsupervised baselines. Local Outlier
+Factor is strongest on this tabular benchmark; PhiGraph ranks second by PR-AUC
+and attains 0.840 precision at a 10\% alert budget. The experiment
+demonstrates functional integration, not state-of-the-art superiority. PhiGraph
+is therefore presented as an auditable governance substrate and research
+prototype (development candidate), not as a proof of correctness, causal
+identification, or safe autonomous operation.
 \end{abstract}
 
 \noindent\textbf{Keywords:} AI governance; software agents; provenance;
-evidence ledger; graph intelligence; policy enforcement; shadow deployment;
-claim verification; reproducible software
+evidence ledger; transactional ledger; GRDI; replay audit; graph intelligence;
+policy enforcement; shadow deployment; claim verification; reproducible software
 
 \section{Introduction}
 
@@ -96,7 +97,7 @@ records relationships among claims, evidence, verification results, policies,
 approvals, and outcomes so that a decision can be reconstructed after the
 fact.
 
-This paper makes five contributions:
+This paper makes seven contributions:
 
 \begin{enumerate}[leftmargin=*]
   \item a typed protocol for claims, evidence, verifications, action proposals,
@@ -105,7 +106,13 @@ This paper makes five contributions:
         necessary conditions for external action;
   \item a backend-neutral, scope-tagged ledger with hash-chain integrity
         metadata and optional HMAC evidence signatures;
-  \item HAV v0.2, a fail-closed extension that verifies agent-generated
+  \item a scoped transactional store (Core~4.1) with declared write locks,
+        idempotent append-once semantics, and fail-closed chain verification
+        on JSON and SQLite backends;
+  \item GRDI~0.4.0, a persisted shadow decision chain from HAV-linked envelopes
+        through authority, simulated gateway receipts, outcomes, and replay
+        audit, without external execution in the current release;
+  \item HAV~v0.2, a fail-closed extension that verifies agent-generated
         textual claims against an authoritative external state and records
         the result through the same protocol and ledger; and
   \item a bounded empirical evaluation comprising software verification and an
@@ -935,6 +942,23 @@ unauthorized changes only under an appropriate trust and key-management model.
 JSON and SQLite are evaluation backends; production use requires hardened
 storage, secrets management, authorization, monitoring, and backup procedures.
 
+\paragraph{Transactional ledger validity.}
+The scoped transactional API is implemented for JSON (single-process staging)
+and SQLite (\texttt{BEGIN IMMEDIATE}). JSON rejects
+\texttt{transactional\_mode=multiprocess} fail-closed. A PostgreSQL backend
+with the same semantics is specified but not shipped in Core~4.1.0-rc.6.
+Contract tests establish integrity checks for the released backends; they do
+not prove Byzantine fault tolerance or safety under a compromised signing key
+and unrestricted storage access.
+
+\paragraph{GRDI and replay validity.}
+GRDI records a shadow decision chain with explicit \texttt{NOT\_EXECUTED}
+invariants. Replay audit verifies persisted structure and signatures without
+re-running simulation or authority evaluation. Historical comparison reports
+structural differences only; it does not establish causal improvement,
+semantic equivalence across deployments, or correctness of shadow simulations.
+External connectors and live execution remain out of scope.
+
 \paragraph{HAV validity.}
 HAV's claim extractor is pattern- and rule-based, not a trained language or
 entailment model; its structured extractor recognizes a fixed vocabulary of
@@ -959,11 +983,14 @@ legal, or correct outcomes.
 
 \section{Reproducibility and Availability}
 
-PhiGraph Core 4.0.0 is implemented in Python and distributed under the MIT
+PhiGraph Core~4.1.0-rc.6 is implemented in Python and distributed under the MIT
 License. Its development repository is maintained at
-\url{https://github.com/wcalmels/phigraph}. This paper is archived on Zenodo at
-\url{https://doi.org/10.5281/zenodo.21689514}. The paper source and references are
-licensed under CC BY 4.0.
+\url{https://github.com/wcalmels/phigraph}. The v2 draft described here
+corresponds to Git commit \texttt{a5a7187} on \texttt{main}. This paper is
+archived on Zenodo at
+\url{https://doi.org/10.5281/zenodo.21689514} (v1); a new version upload will
+supersede the PDF while retaining the same DOI. The paper source and references
+are licensed under CC BY 4.0.
 
 The software test suite can be reproduced with:
 
@@ -971,6 +998,12 @@ The software test suite can be reproduced with:
 python -m venv .venv
 pip install -e ".[api,benchmark,dev,auth,app]"
 pytest
+\end{verbatim}
+
+Scoped transactional contract tests:
+
+\begin{verbatim}
+pytest tests/contract/test_transactional_*.py
 \end{verbatim}
 
 The HAV-specific tests can be run in isolation with:
@@ -1014,9 +1047,10 @@ finance, health, or critical infrastructure.
 PhiGraph makes a specific architectural choice: intelligence does not imply
 authority. Claims must remain linked to evidence and verification; actions must
 remain subject to policy and explicit execution boundaries; outcomes must
-remain auditable. Version 4.0.0 demonstrates this design through a typed
-protocol, tamper-evident ledger, policy-gated runtime, scope-tagged records, and
-an automated test suite. HAV v0.2 extends the same design to a concrete
+remain auditable. Core~4.1.0-rc.6 demonstrates this design through a typed
+protocol, tamper-evident ledger, scoped transactional store, GRDI shadow
+decision chain, policy-gated runtime, scope-tagged records, and an automated
+test suite of 319 cases. HAV~v0.2 extends the same design to a concrete
 instance of the problem: it treats agent-generated status claims as unverified
 until checked against an explicitly supplied authoritative state, and it fails
 closed, rather than open, when that state is unavailable. The external
