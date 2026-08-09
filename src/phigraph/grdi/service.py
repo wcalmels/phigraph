@@ -2,24 +2,30 @@ from __future__ import annotations
 
 from typing import Any
 
+from phigraph.core_v3.ledger import EvidenceLedger
 from phigraph.core_v3.service import CoreV3Service
 from phigraph.grdi.authority import AuthorityEngine
 from phigraph.grdi.execution_gateway import ExecutionGateway
 from phigraph.grdi.models import (
+    OUTCOME_ORIGIN_SHADOW_SIMULATION,
     Approval,
     AuthorityDecision,
     AuthorizationState,
     DecisionEnvelope,
+    EffectAssessment,
     ExecutabilityState,
     ExecutionRequest,
     ExecutionState,
     GatewayDecision,
     GatewayEligibilityState,
     ShadowExecutionReceipt,
+    ShadowOutcomeRecord,
     ShadowSimulationState,
     VerificationState,
     action_hash,
 )
+from phigraph.grdi.outcome_ledger import aggregate_outcome_state, validate_effect_assessments
+from phigraph.version import GRDI_VERSION
 
 
 class GRDIService:
@@ -239,6 +245,273 @@ class GRDIService:
                 project_id=project_id,
                 receipt=receipt,
             )
+
+    def record_shadow_outcome(
+        self,
+        plan_id: str,
+        *,
+        tenant_id: str,
+        project_id: str,
+        recorded_by: str,
+        effect_assessments: tuple[EffectAssessment, ...],
+        metrics: dict[str, Any] | None = None,
+        limitations: tuple[str, ...] = (),
+    ) -> dict[str, Any]:
+        with self.core.ledger._lock:
+            request = self._get_execution_request(plan_id, tenant_id=tenant_id, project_id=project_id)
+            gateway = self._get_gateway_decision(plan_id, tenant_id=tenant_id, project_id=project_id)
+            if gateway.simulation_state is not ShadowSimulationState.SIMULATED:
+                raise ValueError("plan_not_simulated")
+            if gateway.execution_state is not ExecutionState.NOT_EXECUTED:
+                raise ValueError("plan_execution_state_invalid")
+
+            receipt = self._load_validated_shadow_receipt(request, tenant_id=tenant_id, project_id=project_id)
+            try:
+                existing = self._get_shadow_outcome_by_receipt(
+                    receipt.receipt_id,
+                    tenant_id=tenant_id,
+                    project_id=project_id,
+                )
+                validated = self._validate_shadow_outcome(existing, request, receipt)
+                return validated.to_dict()
+            except KeyError:
+                pass
+
+            validate_effect_assessments(effect_assessments)
+            outcome_state = aggregate_outcome_state(request.expected_effects, effect_assessments)
+            source_receipt_hash = self._source_receipt_hash(receipt)
+            if self.core.receipt_signer is None:
+                raise ValueError("receipt_signer_not_configured")
+
+            draft = ShadowOutcomeRecord.create(
+                plan_id=plan_id,
+                shadow_receipt_id=receipt.receipt_id,
+                envelope_id=request.envelope_id,
+                authority_decision_id=request.authority_decision_id,
+                tenant_id=tenant_id,
+                project_id=project_id,
+                recorded_by=recorded_by,
+                effect_assessments=effect_assessments,
+                outcome_state=outcome_state,
+                metrics=metrics or {},
+                limitations=limitations,
+                source_receipt_hash=source_receipt_hash,
+            )
+            outcome_body = {
+                "outcome_id": draft.outcome_id,
+                "plan_id": plan_id,
+                "shadow_receipt_id": receipt.receipt_id,
+                "envelope_id": request.envelope_id,
+                "authority_decision_id": request.authority_decision_id,
+                "tenant_id": tenant_id,
+                "project_id": project_id,
+                "recorded_by": recorded_by,
+                "effect_assessments": [assessment.to_dict() for assessment in effect_assessments],
+                "outcome_state": outcome_state.value,
+                "metrics": metrics or {},
+                "limitations": list(limitations),
+                "outcome_origin": OUTCOME_ORIGIN_SHADOW_SIMULATION,
+                "executed": False,
+                "external_side_effects": False,
+                "connector_invoked": False,
+                "execution_state": ExecutionState.NOT_EXECUTED.value,
+                "source_receipt_hash": source_receipt_hash,
+                "recorded_at": draft.recorded_at,
+                "version": GRDI_VERSION,
+            }
+            signed_outcome = self.core.receipt_signer.sign(outcome_body)
+            record = ShadowOutcomeRecord(
+                outcome_id=draft.outcome_id,
+                plan_id=plan_id,
+                shadow_receipt_id=receipt.receipt_id,
+                envelope_id=request.envelope_id,
+                authority_decision_id=request.authority_decision_id,
+                tenant_id=tenant_id,
+                project_id=project_id,
+                recorded_by=recorded_by,
+                effect_assessments=effect_assessments,
+                outcome_state=outcome_state,
+                metrics=metrics or {},
+                limitations=limitations,
+                source_receipt_hash=source_receipt_hash,
+                signed_outcome=signed_outcome,
+                recorded_at=draft.recorded_at,
+            )
+            stored_row, _created = self.core.ledger.register_scoped_record_once(
+                "shadow_outcomes",
+                record.to_dict(),
+                unique_key="shadow_receipt_id",
+                tenant_id=tenant_id,
+                project_id=project_id,
+            )
+            stored = self._shadow_outcome_from_row(stored_row)
+            validated = self._validate_shadow_outcome(stored, request, receipt)
+            return validated.to_dict()
+
+    def get_shadow_outcome(self, outcome_id: str, *, tenant_id: str, project_id: str) -> dict[str, Any]:
+        record = self._get_shadow_outcome(outcome_id, tenant_id=tenant_id, project_id=project_id)
+        plan_id = str(record.signed_outcome.get("plan_id", record.plan_id))
+        request = self._get_execution_request(plan_id, tenant_id=tenant_id, project_id=project_id)
+        receipt = self._load_validated_shadow_receipt(request, tenant_id=tenant_id, project_id=project_id)
+        return self._validate_shadow_outcome(record, request, receipt).to_dict()
+
+    def get_outcome_for_plan(self, plan_id: str, *, tenant_id: str, project_id: str) -> dict[str, Any]:
+        record = self._get_shadow_outcome_by_plan(plan_id, tenant_id=tenant_id, project_id=project_id)
+        signed_plan_id = str(record.signed_outcome.get("plan_id", record.plan_id))
+        request = self._get_execution_request(signed_plan_id, tenant_id=tenant_id, project_id=project_id)
+        receipt = self._load_validated_shadow_receipt(request, tenant_id=tenant_id, project_id=project_id)
+        return self._validate_shadow_outcome(record, request, receipt).to_dict()
+
+    @staticmethod
+    def _source_receipt_hash(receipt: ShadowExecutionReceipt) -> str:
+        return EvidenceLedger.hash_payload(receipt.to_dict())
+
+    @staticmethod
+    def _require_signed_outcome_match(record_value: Any, signed_value: Any, error: str) -> None:
+        if record_value != signed_value:
+            raise ValueError(error)
+
+    def _validate_shadow_outcome(
+        self,
+        record: ShadowOutcomeRecord,
+        request: ExecutionRequest,
+        receipt: ShadowExecutionReceipt,
+    ) -> ShadowOutcomeRecord:
+        if self.core.receipt_signer is None:
+            raise ValueError("receipt_signer_not_configured")
+        signed = record.signed_outcome
+        if not self.core.receipt_signer.verify(signed):
+            raise ValueError("invalid_shadow_outcome_signature")
+
+        expected_hash = self._source_receipt_hash(receipt)
+        if record.source_receipt_hash != expected_hash:
+            raise ValueError("shadow_outcome_source_receipt_hash_mismatch")
+        if signed.get("source_receipt_hash") != expected_hash:
+            raise ValueError("shadow_outcome_signed_source_receipt_hash_mismatch")
+
+        self._require_signed_outcome_match(
+            record.outcome_id,
+            signed.get("outcome_id"),
+            "shadow_outcome_outcome_id_mismatch",
+        )
+        self._require_signed_outcome_match(
+            record.recorded_by,
+            signed.get("recorded_by"),
+            "shadow_outcome_recorded_by_mismatch",
+        )
+        self._require_signed_outcome_match(
+            record.metrics,
+            signed.get("metrics", {}),
+            "shadow_outcome_metrics_mismatch",
+        )
+        self._require_signed_outcome_match(
+            list(record.limitations),
+            signed.get("limitations", []),
+            "shadow_outcome_limitations_mismatch",
+        )
+        self._require_signed_outcome_match(
+            record.recorded_at,
+            signed.get("recorded_at"),
+            "shadow_outcome_recorded_at_mismatch",
+        )
+        self._require_signed_outcome_match(
+            record.version,
+            signed.get("version"),
+            "shadow_outcome_version_mismatch",
+        )
+
+        if record.plan_id != request.plan_id or signed.get("plan_id") != request.plan_id:
+            raise ValueError("shadow_outcome_plan_mismatch")
+        if record.shadow_receipt_id != receipt.receipt_id or signed.get("shadow_receipt_id") != receipt.receipt_id:
+            raise ValueError("shadow_outcome_receipt_mismatch")
+        if record.envelope_id != request.envelope_id or signed.get("envelope_id") != request.envelope_id:
+            raise ValueError("shadow_outcome_envelope_mismatch")
+        if record.authority_decision_id != request.authority_decision_id:
+            raise ValueError("shadow_outcome_authority_mismatch")
+        if signed.get("authority_decision_id") != request.authority_decision_id:
+            raise ValueError("shadow_outcome_signed_authority_mismatch")
+        if record.tenant_id != request.tenant_id or signed.get("tenant_id") != request.tenant_id:
+            raise ValueError("shadow_outcome_tenant_mismatch")
+        if record.project_id != request.project_id or signed.get("project_id") != request.project_id:
+            raise ValueError("shadow_outcome_project_mismatch")
+
+        stored_assessments = tuple(
+            EffectAssessment.from_dict(item) for item in signed.get("effect_assessments", [])
+        )
+        if len(stored_assessments) != len(record.effect_assessments):
+            raise ValueError("shadow_outcome_assessments_mismatch")
+        for stored, current in zip(stored_assessments, record.effect_assessments, strict=True):
+            if stored.to_dict() != current.to_dict():
+                raise ValueError("shadow_outcome_assessments_mismatch")
+
+        aggregated = aggregate_outcome_state(request.expected_effects, record.effect_assessments)
+        if record.outcome_state != aggregated or signed.get("outcome_state") != aggregated.value:
+            raise ValueError("shadow_outcome_state_mismatch")
+
+        if (
+            record.executed
+            or record.external_side_effects
+            or record.connector_invoked
+            or record.outcome_origin != OUTCOME_ORIGIN_SHADOW_SIMULATION
+            or record.execution_state is not ExecutionState.NOT_EXECUTED
+        ):
+            raise ValueError("shadow_outcome_execution_claim_invalid")
+        if (
+            signed.get("executed")
+            or signed.get("external_side_effects")
+            or signed.get("connector_invoked")
+            or signed.get("outcome_origin") != OUTCOME_ORIGIN_SHADOW_SIMULATION
+            or signed.get("execution_state") != ExecutionState.NOT_EXECUTED.value
+        ):
+            raise ValueError("shadow_outcome_signed_execution_claim_invalid")
+
+        return record
+
+    def _get_shadow_outcome(self, outcome_id: str, *, tenant_id: str, project_id: str) -> ShadowOutcomeRecord:
+        rows = self.core.ledger.query(
+            "shadow_outcomes",
+            tenant_id=tenant_id,
+            project_id=project_id,
+            limit=100000,
+        )
+        row = next((item for item in rows if item["outcome_id"] == outcome_id), None)
+        if row is None:
+            raise KeyError("shadow_outcome_not_found_in_scope")
+        return self._shadow_outcome_from_row(row)
+
+    def _get_shadow_outcome_by_plan(self, plan_id: str, *, tenant_id: str, project_id: str) -> ShadowOutcomeRecord:
+        rows = self.core.ledger.query(
+            "shadow_outcomes",
+            tenant_id=tenant_id,
+            project_id=project_id,
+            limit=100000,
+        )
+        row = next((item for item in rows if item["plan_id"] == plan_id), None)
+        if row is None:
+            raise KeyError("shadow_outcome_not_found_in_scope")
+        return self._shadow_outcome_from_row(row)
+
+    def _get_shadow_outcome_by_receipt(
+        self,
+        shadow_receipt_id: str,
+        *,
+        tenant_id: str,
+        project_id: str,
+    ) -> ShadowOutcomeRecord:
+        rows = self.core.ledger.query(
+            "shadow_outcomes",
+            tenant_id=tenant_id,
+            project_id=project_id,
+            limit=100000,
+        )
+        row = next((item for item in rows if item["shadow_receipt_id"] == shadow_receipt_id), None)
+        if row is None:
+            raise KeyError("shadow_outcome_not_found_in_scope")
+        return self._shadow_outcome_from_row(row)
+
+    @staticmethod
+    def _shadow_outcome_from_row(row: dict[str, Any]) -> ShadowOutcomeRecord:
+        return ShadowOutcomeRecord.from_dict(row)
 
     @staticmethod
     def _plan_payload(

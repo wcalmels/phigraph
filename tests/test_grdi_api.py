@@ -226,4 +226,6 @@ def test_openapi_exposes_grdi_routes_without_real_execution(tmp_path):
     assert "/v4/grdi/envelopes/{envelope_id}/authorize" in paths
     assert "/v4/grdi/execution-plans" in paths
     assert "/v4/grdi/execution-plans/{plan_id}/simulate" in paths
+    assert "/v4/grdi/execution-plans/{plan_id}/outcomes" in paths
+    assert "/v4/grdi/outcomes/{outcome_id}" in paths
     assert not any(path.endswith("/execute") for path in paths)

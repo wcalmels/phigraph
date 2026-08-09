@@ -1,5 +1,13 @@
 # Changelog
 
+## 4.1.0-rc.4 - 2026-08-08 (development candidate)
+
+- Added immutable Shadow Outcome Ledger fed only by validated simulation receipts.
+- Added deterministic effect assessment aggregation and signed outcome records.
+- Added `/v4/grdi/execution-plans/{plan_id}/outcomes` and outcome read endpoints.
+- Enforced one outcome per `shadow_receipt_id` with in-process atomicity.
+- Added ADR-018, outcome protocol, conformance report and release notes.
+
 ## 4.1.0-rc.3 - 2026-08-08 (development candidate)
 
 - Added shadow Execution Gateway for auditable execution plans without external effects.

@@ -28,6 +28,7 @@ _PERMISSIONS = {
             "grdi:authorize",
             "grdi:plan",
             "grdi:simulate",
+            "grdi:record_outcome",
         }
     ),
     Role.ADMIN: frozenset({"*"}),

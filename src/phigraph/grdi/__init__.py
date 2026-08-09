@@ -1,20 +1,26 @@
 from .authority import AuthorityEngine
 from .execution_gateway import ExecutionGateway
 from .models import (
+    OUTCOME_ORIGIN_SHADOW_SIMULATION,
     Approval,
     AuthorityDecision,
     AuthorizationState,
     DecisionEnvelope,
+    EffectAssessment,
+    EffectAssessmentState,
     ExecutabilityState,
     ExecutionRequest,
     ExecutionState,
     GatewayDecision,
     GatewayEligibilityState,
     ShadowExecutionReceipt,
+    ShadowOutcomeRecord,
+    ShadowOutcomeState,
     ShadowSimulationState,
     VerificationState,
     action_hash,
 )
+from .outcome_ledger import aggregate_outcome_state, validate_effect_assessments
 from .service import GRDIService
 
 __all__ = [
@@ -23,6 +29,8 @@ __all__ = [
     "AuthorityDecision",
     "AuthorityEngine",
     "DecisionEnvelope",
+    "EffectAssessment",
+    "EffectAssessmentState",
     "ExecutabilityState",
     "ExecutionGateway",
     "ExecutionRequest",
@@ -30,8 +38,13 @@ __all__ = [
     "GRDIService",
     "GatewayDecision",
     "GatewayEligibilityState",
+    "OUTCOME_ORIGIN_SHADOW_SIMULATION",
     "ShadowExecutionReceipt",
+    "ShadowOutcomeRecord",
+    "ShadowOutcomeState",
     "ShadowSimulationState",
     "VerificationState",
     "action_hash",
+    "aggregate_outcome_state",
+    "validate_effect_assessments",
 ]

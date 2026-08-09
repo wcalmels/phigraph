@@ -35,6 +35,7 @@ class EvidenceLedger:
         "execution_requests",
         "gateway_decisions",
         "shadow_execution_receipts",
+        "shadow_outcomes",
     )
 
     def __init__(self, path: str | Path | None = None, *, backend: LedgerBackend | None = None,
@@ -212,6 +213,7 @@ class EvidenceLedger:
             "execution_requests",
             "gateway_decisions",
             "shadow_execution_receipts",
+            "shadow_outcomes",
         }
         if collection not in allowed:
             raise ValueError(f"Unsupported scoped extension collection: {collection}")
@@ -235,6 +237,7 @@ class EvidenceLedger:
             "execution_requests",
             "gateway_decisions",
             "shadow_execution_receipts",
+            "shadow_outcomes",
         }
         if collection not in allowed:
             raise ValueError(f"Unsupported scoped extension collection: {collection}")
@@ -271,6 +274,7 @@ class EvidenceLedger:
             "execution_requests",
             "gateway_decisions",
             "shadow_execution_receipts",
+            "shadow_outcomes",
         }
         if collection not in allowed:
             raise ValueError(f"Unsupported scoped extension collection: {collection}")

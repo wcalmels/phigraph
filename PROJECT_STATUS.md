@@ -1,49 +1,50 @@
 # PhiGraph Project Status
 
 **Last updated:** 2026-08-08
-**Branch:** `feature/grdi-execution-gateway-shadow-v1`
-**Release target:** 4.1.0-rc.3 → 4.1.0 stable
+**Branch:** `feature/grdi-outcome-ledger-shadow-v1`
+**Release target:** 4.1.0-rc.4 → 4.1.0 stable
 
 ## Executive summary
 
-PhiGraph Core **4.1.0-rc.3** adds GRDI Shadow Execution Gateway v0.2 over GRDI
-Foundation v0.1 and canonical HAV v0.2. Authorized decisions can now produce
-auditable shadow execution plans and signed simulation receipts. No connector is
-invoked and no external side effect is produced. Outcome Ledger and real
-connectors remain future increments.
+PhiGraph Core **4.1.0-rc.4** adds GRDI Shadow Outcome Ledger v0.3 on top of the
+shadow Execution Gateway. Simulation receipts can now produce immutable, signed
+outcome records that describe declared shadow results without representing real
+execution or external effects.
 
 ## Current versions
 
 | Artifact | Version |
 |----------|---------|
-| Core | 4.1.0-rc.3 (development candidate) |
-| GRDI | 0.2.0 (Shadow Execution Gateway) |
+| Core | 4.1.0-rc.4 (development candidate) |
+| GRDI | 0.3.0 (Shadow Outcome Ledger) |
+| Outcome Ledger protocol | 0.1.0 |
 | HAV | 0.2.0 |
 | Protocol | 2.0.0 |
 | Python | 3.10+ |
 
 ## Completed (this branch)
 
-- [x] Shadow Execution Gateway with fail-closed scope and action-hash checks
-- [x] `ExecutionRequest`, `GatewayDecision`, `ShadowExecutionReceipt` models
-- [x] Ledger collections with JSON/SQLite persistence and chain integrity
-- [x] `/v4/grdi/execution-plans` create, read, and simulate endpoints
-- [x] RBAC permissions `grdi:plan` and `grdi:simulate`
-- [x] Adversarial tests for scope, authority, tampering, idempotency, restart
-- [x] Documentation: ADR-017, gateway protocol, shadow conformance report
+- [x] Shadow Outcome models and deterministic aggregation
+- [x] Signed outcomes bound to validated simulation receipts
+- [x] `shadow_outcomes` ledger collection with JSON/SQLite compatibility
+- [x] `/v4/grdi/execution-plans/{plan_id}/outcomes` record/read API
+- [x] RBAC permission `grdi:record_outcome`
+- [x] Adversarial tests for tampering, scope, idempotency, and concurrency
+- [x] ADR-018, outcome protocol, conformance report, release notes
 
 ## In progress
 
-- [ ] Outcome Ledger fed by shadow simulations only
+- [ ] Historical replay and comparison engine (shadow-only)
 - [ ] Real connector phase (separate milestone)
 
-## Architecture flow (shadow)
+## Chain
 
 ```text
-VERIFIED → AUTHORIZED → ELIGIBLE_FOR_SHADOW → SIMULATED → NOT_EXECUTED
+Decision Envelope → Authority Decision → Shadow Execution Receipt
+→ Shadow Outcome Record → Replay/Audit
 ```
 
 ## Verification target
 
-- Baseline **182** tests preserved plus **18** gateway tests (**200** total)
+- Baseline **200** tests preserved plus **20** outcome tests (**220** total)
 - Ruff, Bandit, build, wheel, Docker green in CI
