@@ -42,8 +42,17 @@ Immutable, signed, scoped ledger row with:
 - `outcome_origin = SHADOW_SIMULATION`
 - shadow flags forced false (`executed`, `external_side_effects`, `connector_invoked`)
 - `execution_state = NOT_EXECUTED`
-- `source_receipt_hash` binding to the signed simulation receipt
-- `signed_outcome` HMAC payload verifiable by Core
+- `source_receipt_hash` binding to the canonical full simulation receipt
+- `signed_outcome` HMAC payload verifiable by Core, including `recorded_at` and `version`
+
+## Fail-closed controls
+
+- Empty `effect_assessments` are allowed when the plan declares no expected effects.
+- Missing assessments with declared expected effects aggregate to `NOT_EVALUATED`.
+- Exterior record fields must match the signed outcome payload, including identity,
+  metrics, limitations, timestamp and version.
+- `source_receipt_hash` covers the full canonical `ShadowExecutionReceipt`, not only
+  the normalized plan body.
 
 ## Aggregation
 
