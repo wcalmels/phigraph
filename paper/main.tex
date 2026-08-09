@@ -1,0 +1,810 @@
+\documentclass[11pt]{article}
+
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage[margin=1in]{geometry}
+\usepackage{amsmath}
+\usepackage{amssymb}
+\usepackage{booktabs}
+\usepackage{enumitem}
+\usepackage{float}
+\usepackage{xcolor}
+\usepackage{hyperref}
+\usepackage{tikz}
+\usetikzlibrary{arrows.meta, positioning, shapes.geometric, calc}
+\usepackage{pgfplots}
+\pgfplotsset{compat=1.18}
+
+\hypersetup{
+  colorlinks=true,
+  linkcolor=blue!50!black,
+  citecolor=blue!50!black,
+  urlcolor=blue!60!black,
+  pdftitle={PhiGraph Core 4.0: A Shadow-First Evidence Ledger and Policy-Gated Runtime for Software-Agent Operations},
+  pdfauthor={Walter Calmels von Dem Knesebeck}
+}
+
+\title{\textbf{PhiGraph Core 4.0: A Shadow-First Evidence Ledger and Policy-Gated Runtime for Software-Agent Operations}}
+\author{
+  Walter Calmels von Dem Knesebeck\\
+  TUCH Systems, Santiago, Chile\\
+  \href{mailto:wcalmels@phi47.cl}{wcalmels@phi47.cl}
+}
+\date{July 2026}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+Software agents and artificial-intelligence systems can produce claims,
+recommendations, and action proposals faster than organizations can verify and
+govern them. This paper presents PhiGraph Core 4.0.0, an MIT-licensed,
+model-agnostic system that treats model output as a proposal rather than as
+verified truth. PhiGraph represents claims, evidence, verifications, action
+proposals, policy decisions, and outcomes as linked records; stores them in a
+scope-tagged, tamper-evident ledger; and places policy evaluation between agent
+proposals and operational execution. Replay and shadow modes cannot execute
+external actions, while higher-authority modes require both an explicit
+executor and an allowing policy decision. We describe the protocol, runtime,
+ledger, deployment boundaries, and Python implementation. Building on this
+substrate, we additionally describe PhiGraph HAV v0.2, a fail-closed
+verification layer that extracts claims from agent-generated text, checks them
+against an explicitly supplied authoritative state, and records the resulting
+claims, evidence, verifications, and policy decisions in the same ledger.
+Engineering verification comprises 128 automated tests (117 core tests and 11
+HAV-specific tests); the continuous-integration configuration targets Python
+3.10--3.13. An initial external experiment on the CIC-IDS2017
+Friday DDoS flow file compares a PhiGraph relational score with three
+unsupervised baselines. Local Outlier Factor is strongest on this tabular
+benchmark; PhiGraph ranks second by PR-AUC and attains 0.840 precision at a
+10\% alert budget. The experiment demonstrates functional integration, not
+state-of-the-art superiority: it uses a single imperfect dataset, a
+feature-similarity graph, and one fixed split. PhiGraph is therefore presented
+as an auditable governance substrate and research prototype, not as a proof of
+correctness, causal identification, or safe autonomous operation.
+\end{abstract}
+
+\noindent\textbf{Keywords:} AI governance; software agents; provenance;
+evidence ledger; graph intelligence; policy enforcement; shadow deployment;
+claim verification; reproducible software
+
+\section{Introduction}
+
+Modern software agents can synthesize text, modify code, recommend operational
+changes, invoke tools, and coordinate multi-step workflows. Their outputs may
+be useful without being reliable, authorized, or supported by reproducible
+evidence. This creates a control problem: an organization must determine what
+was claimed, which evidence supported or refuted it, which policy governed a
+proposed action, who approved it, and what happened after evaluation or
+execution.
+
+Existing guidance emphasizes lifecycle risk management and traceability.
+The NIST AI Risk Management Framework organizes activities around governing,
+mapping, measuring, and managing AI risk \cite{nist2023airmf}. W3C PROV provides
+a general vocabulary for provenance \cite{lebo2013provo}, while model cards and
+dataset datasheets improve documentation of released artifacts
+\cite{mitchell2019modelcards,gebru2021datasheets}. These approaches are
+important, but they do not by themselves define an operational boundary
+between a model-generated proposal and an authorized action.
+
+PhiGraph addresses this boundary through an evidence-oriented protocol and a
+policy-gated runtime. Its central invariant is that model output is a candidate
+claim or action proposal, not verified truth or implicit authority. The system
+records relationships among claims, evidence, verification results, policies,
+approvals, and outcomes so that a decision can be reconstructed after the
+fact.
+
+This paper makes five contributions:
+
+\begin{enumerate}[leftmargin=*]
+  \item a typed protocol for claims, evidence, verifications, action proposals,
+        policy decisions, and outcomes;
+  \item a runtime in which policy evaluation and an explicit executor are
+        necessary conditions for external action;
+  \item a backend-neutral, scope-tagged ledger with hash-chain integrity
+        metadata and optional HMAC evidence signatures;
+  \item HAV v0.2, a fail-closed extension that verifies agent-generated
+        textual claims against an authoritative external state and records
+        the result through the same protocol and ledger; and
+  \item a bounded empirical evaluation comprising software verification and an
+        external anomaly-ranking experiment, together with explicit threats to
+        validity.
+\end{enumerate}
+
+\section{Related Work}
+
+\subsection{Governance, documentation, and provenance}
+
+The NIST AI RMF is a voluntary, use-case-agnostic framework for managing AI
+risk \cite{nist2023airmf}. PhiGraph is not an implementation or certification
+of that framework; it provides operational records that may support governance
+activities. PROV-O formalizes entities, activities, agents, and provenance
+relations \cite{lebo2013provo}. PhiGraph uses a narrower application protocol
+centered on verification and policy-gated action. A future interoperability
+layer could map PhiGraph records to PROV-O.
+
+Model cards \cite{mitchell2019modelcards} and datasheets for datasets
+\cite{gebru2021datasheets} make intended uses, evaluation conditions, and
+limitations explicit. PhiGraph applies a related transparency principle at
+runtime: each claim and action remains linked to its evidence, decision, and
+outcome rather than relying only on static release documentation.
+
+\subsection{Relational representations and software assurance}
+
+Graph-based representations make entities and relationships first-class and
+support structured reasoning \cite{battaglia2018relational}. PhiGraph uses
+heterogeneous graphs and classical graph analytics; it does not require a graph
+neural network and does not claim that graph structure alone establishes
+causality. In software assurance, in-toto protects software-supply-chain
+integrity through verifiable step metadata \cite{torresarias2019intoto}.
+PhiGraph shares an emphasis on attributable records but targets a broader
+claim--evidence--policy--action lifecycle.
+
+Agentic systems introduce risks including tool misuse, privilege compromise,
+untraceable actions, and cascading errors. The OWASP Agentic Security
+Initiative provides an industry threat taxonomy \cite{owasp2025agentic}.
+PhiGraph's deny-by-default policy, approval requirements, idempotency controls,
+and shadow-first deployment are engineering controls relevant to these risks;
+they are not a complete security solution.
+
+\subsection{Automated claim verification}
+
+Large language models can generate fluent text that is not supported by, or
+directly contradicts, available evidence, a phenomenon surveyed broadly across
+natural-language-generation tasks \cite{ji2023hallucination}. FEVER established
+claim verification against textual evidence as a distinct research problem,
+using retrieval and entailment models over a large Wikipedia-derived claim set
+\cite{thorne2018fever}. PhiGraph's HAV extension (Section~\ref{sec:hav})
+targets a narrower, operational instance of this problem: claims that an
+AI agent makes about the status of a software system, checked against a
+caller-supplied authoritative state rather than an open-domain knowledge base.
+It does not use a trained entailment model and does not claim comparable
+coverage or accuracy to FEVER-style systems; its contribution is a fail-closed
+policy binding between extracted claims and PhiGraph's existing evidence
+ledger and governance protocol.
+
+\section{System Model and Design Goals}
+\label{sec:systemmodel}
+
+Let an agent produce a proposal
+\[
+P = (C, A),
+\]
+where $C$ is a set of claims and $A$ is a set of proposed actions. A claim does
+not become verified merely because an agent assigns it high confidence.
+Instead, a verifier records a result over a claim and an explicit evidence set.
+Similarly, an action is not authorized by its presence in $P$: the policy
+engine evaluates the action under a runtime mode and an approval set.
+
+PhiGraph is designed around six goals:
+
+\begin{enumerate}[leftmargin=*]
+  \item \textbf{Evidence boundedness:} when evidence identifiers are supplied,
+        verification results reference evidence already registered in the
+        ledger.
+  \item \textbf{Least authority:} absence of a matching policy blocks an
+        action.
+  \item \textbf{Traceability:} claims, decisions, and outcomes remain
+        reconstructable.
+  \item \textbf{Safe evaluation:} replay and shadow runs never execute an
+        external action.
+  \item \textbf{Scope tagging:} tenant and project identifiers propagate
+        through stored records and can be used to filter queries.
+  \item \textbf{Model neutrality:} deterministic programs, statistical models,
+        and language-model agents can use the same protocol.
+\end{enumerate}
+
+\section{PhiGraph Architecture}
+\label{sec:architecture}
+
+\begin{figure}[H]
+\centering
+\resizebox{\linewidth}{!}{%
+\begin{tikzpicture}[
+  node distance=6mm and 6mm,
+  every node/.style={font=\small},
+  box/.style={draw, rounded corners=2pt, align=center, minimum height=0.9cm, inner sep=5pt},
+  lbl/.style={font=\small\bfseries},
+  arr/.style={-{Latex[length=2.4mm]}, thick}
+]
+
+\node[box, fill=blue!10, minimum width=8.6cm] (agent) {Agent or deterministic adapter};
+
+\node[lbl, below=8mm of agent] (protolbl) {Protocol layer};
+\node[box, fill=green!8, minimum width=8.6cm, below=1mm of protolbl] (claimrow)
+  {Claim $\leftrightarrow$ Evidence $\leftrightarrow$ Verification};
+\node[box, fill=green!8, minimum width=8.6cm, below=2mm of claimrow] (actionrow)
+  {ActionProposal $\leftrightarrow$ PolicyDecision $\leftrightarrow$ Outcome};
+
+\node[lbl, below=8mm of actionrow] (corelbl) {Core service};
+\node[box, fill=orange!12, minimum width=2.0cm, below=1mm of corelbl, anchor=north, xshift=-3.25cm] (ledger)
+  {Evidence\\ledger};
+\node[box, fill=orange!12, minimum width=2.0cm, right=3mm of ledger] (policy) {Policy\\engine};
+\node[box, fill=orange!12, minimum width=2.0cm, right=3mm of policy] (runtime) {Runtime};
+\node[box, fill=orange!12, minimum width=2.0cm, right=3mm of runtime] (telemetry) {Telemetry};
+
+\node[lbl, below=8mm of ledger, xshift=3.25cm] (deploylbl) {Deployment boundary};
+\node[box, fill=red!8, minimum width=4.2cm, below=1mm of deploylbl, anchor=north, xshift=-2.2cm] (shadow)
+  {Replay / Shadow\\(non-executing)};
+\node[box, fill=red!8, minimum width=4.2cm, right=3mm of shadow] (guarded)
+  {Copilot / Guarded-auto\\(explicit executor)};
+
+\draw[arr] (agent.south) -- (protolbl.north)
+  node[midway, right, font=\scriptsize, align=left] {proposal:\\claims \& actions};
+\draw[arr] (actionrow.south) -- (corelbl.north);
+\draw[arr] ($(ledger.south)!0.5!(telemetry.south)$) -- (deploylbl.north);
+
+\end{tikzpicture}%
+}
+\caption{PhiGraph separates agent proposals from verification, policy
+evaluation, and execution. Arrows indicate recorded processing relationships,
+not automatic trust propagation.}
+\label{fig:architecture}
+\end{figure}
+
+\subsection{Canonical protocol}
+
+Protocol version 2.0.0 exposes six principal frozen dataclass record schemas:
+
+\begin{itemize}[leftmargin=*]
+  \item \texttt{Claim}: statement, type, subject, issuer, status, confidence,
+        evidence references, and optional supersession;
+  \item \texttt{Evidence}: kind, source, payload, status, content hash,
+        observation time, and metadata;
+  \item \texttt{Verification}: claim, verifier, method, result, evidence
+        references, rationale, and time;
+  \item \texttt{ActionProposal}: action type, target, proposer, parameters,
+        rationale claims, reversibility, and risk level;
+  \item \texttt{PolicyDecision}: effect, applicable policies, reasons,
+        required approvals, and time; and
+  \item \texttt{Outcome}: action, status, whether execution occurred, observed
+        effects, evidence references, and time.
+\end{itemize}
+
+Claim states distinguish proposed, unverified, partially verified, verified,
+refuted, and superseded records. Policy effects distinguish allow, warn,
+require approval, and block. These states make uncertainty and governance
+decisions explicit instead of collapsing them into a single confidence score.
+The current implementation does not require a non-empty evidence set for every
+verified claim and does not assess evidentiary sufficiency. This is an
+enforcement gap, not a guarantee supplied by the protocol. Figure
+\ref{fig:protocol-lifecycle} shows how the six record types reference one
+another across a full claim-to-outcome cycle.
+
+\begin{figure}[H]
+\centering
+\resizebox{0.56\linewidth}{!}{%
+\begin{tikzpicture}[
+  every node/.style={font=\small},
+  rec/.style={draw, rounded corners=2pt, align=center, fill=blue!8, minimum width=2.6cm, minimum height=0.9cm, inner sep=3pt},
+  arr/.style={-{Latex[length=2.2mm]}, thick},
+  darr/.style={-{Latex[length=2.2mm]}, thick, dashed}
+]
+\node[rec] (claim) at (90:3.1) {Claim};
+\node[rec] (verification) at (30:3.1) {Verification};
+\node[rec] (evidence) at (-30:3.1) {Evidence};
+\node[rec] (action) at (-90:3.1) {ActionProposal};
+\node[rec] (policy) at (-150:3.1) {PolicyDecision};
+\node[rec] (outcome) at (150:3.1) {Outcome};
+
+\draw[arr] (claim) -- (verification);
+\draw[arr] (evidence) -- (verification);
+\draw[darr] (verification) to[bend left=18]
+  node[midway, sloped, above, font=\scriptsize] {updates status} (claim);
+\draw[arr] (claim) -- (action)
+  node[midway, left, font=\scriptsize, align=center, xshift=-2pt] {rationale\\claims};
+\draw[arr] (action) -- (policy);
+\draw[arr] (policy) -- (outcome);
+\draw[darr] (outcome) to[bend left=18]
+  node[midway, sloped, below, font=\scriptsize] {observed effects} (evidence);
+\end{tikzpicture}%
+}
+\caption{The protocol's recorded lifecycle. Solid arrows show synchronous
+references (a verification cites claims and evidence; an action proposal
+cites rationale claims; a policy decision governs a proposal; an outcome
+follows a decision). Dashed arrows show asynchronous feedback: a verification
+updates claim status, and an outcome's observed effects may be registered as
+new evidence for future claims. The cycle is auditable, not automatic --
+each edge corresponds to an explicit recorded reference, not an implicit
+trust relationship.}
+\label{fig:protocol-lifecycle}
+\end{figure}
+
+\subsection{Evidence ledger}
+
+The ledger supports JSON, SQLite, and PostgreSQL backends through a common
+interface. Collections are maintained for claims, evidence, verifications,
+actions, policy decisions, and outcomes. Most records are appended. Claim
+verification performs a controlled in-place state transition and then rebuilds
+the affected collection chains. Each ordinary append computes
+\[
+h_i =
+\operatorname{SHA256}\!\left(h_{i-1}\,\Vert\,k\,\Vert\,
+\operatorname{canonical}(r_i)\right),
+\]
+where $r_i$ is a record and $k$ identifies its collection. Verification checks
+link continuity and recomputes each hash. Evidence payloads receive a SHA-256
+content hash and may be signed with HMAC-SHA256 when a signing key is supplied.
+
+Chain verification detects changes relative to the currently stored chain.
+This mechanism is \emph{tamper evident}, not tamper proof: without an external
+anchor or protected signing key, it cannot distinguish malicious tampering
+from an authorized rebuild. An attacker with write access to both the records
+and all integrity keys can rebuild a consistent chain. Stronger deployment
+requires external key management, append-only storage, access control, backups,
+and independent audit anchors.
+
+\subsection{Policy-gated runtime}
+
+The policy engine matches action type, permitted runtime modes, maximum risk,
+reversibility, and required approvals. No matching rule produces an implicit
+deny decision. For an action $a$, decision $d$, mode $m$, and executor $x$, the
+core execution condition is
+\[
+\operatorname{execute}(a) \iff
+\bigl(d.\mathrm{effect}=\mathrm{allow}\bigr)
+\land \bigl(m\in\{\mathrm{copilot},\mathrm{guarded\_auto}\}\bigr)
+\land (x\neq\varnothing).
+\]
+Replay and shadow modes therefore generate simulated outcomes with
+\texttt{executed=false}. The packaged deployment configuration is stricter:
+it defaults to shadow-only operation, rejects attempts to disable that
+boundary, and disables real connectors. The core abstractions expose
+higher-authority modes for controlled future integration, but the supplied
+deployment does not grant arbitrary external execution.
+
+\subsection{API, SDK, and operations}
+
+The Python SDK can send tenant and project headers, API-key or bearer
+credentials, and idempotency keys. Authentication, PostgreSQL persistence, and
+signing are supported by lower-level Core components when explicitly
+configured. The packaged application does not currently wire every one of
+these options into the Core v3 router. Its Docker configuration must therefore
+be treated as a local evaluation setup unless protected by an external
+authentication and network boundary. Scope headers are application metadata
+and query filters; the present implementation does not provide end-to-end
+tenant isolation or same-scope referential-integrity guarantees.
+
+\subsection{Human-Assisted Verification (HAV v0.2)}
+\label{sec:hav}
+
+HAV v0.2 is an additive module (\texttt{phigraph.hav}) that checks candidate
+textual output from an AI agent, such as a status summary or a release note,
+against an authoritative state supplied explicitly by the caller, and records
+the outcome through the existing Core protocol and ledger described in
+Section~\ref{sec:architecture}. HAV does not modify the ledger, policy engine,
+or runtime described above; it is a client of that protocol.
+
+\paragraph{Pipeline.} A verification request carries a candidate output string
+and an \texttt{AuthoritativeState}: a set of source-attributed evidence facts,
+or an explicit \emph{unavailable} marker with a reason. A hybrid extractor
+combines fixed regular-expression patterns for structured, repository-style
+predicates (for example, test counts, CI or CodeQL status, and global
+success or production-readiness phrasing) with a second extractor that
+flags generic factual-looking substrings (percentages, dates, quantities,
+and source attributions) without asserting their truth. Every claim produced
+by the second extractor is marked \texttt{requires\_external\_grounding=true}
+and is not treated as verified evidence on its own. A verifier then compares
+each claim against the authoritative state by subject and predicate, and
+classifies it as supported, contradicted, unsupported, partially supported, or
+having insufficient evidence. Figure~\ref{fig:hav-pipeline} traces this
+pipeline from candidate output to ledger records.
+
+\begin{figure}[H]
+\centering
+\resizebox{0.72\linewidth}{!}{%
+\begin{tikzpicture}[
+  node distance=5mm and 9mm,
+  box/.style={draw, rounded corners=2pt, align=center, font=\small,
+    minimum width=8.0cm, minimum height=0.85cm, fill=blue!7, inner sep=5pt},
+  side/.style={draw, rounded corners=2pt, align=center, font=\scriptsize,
+    minimum width=3.1cm, minimum height=0.85cm, fill=yellow!15, inner sep=4pt},
+  arr/.style={-{Latex[length=2.2mm]}, thick}
+]
+\node[box] (n1) {Candidate output (agent-generated text)};
+\node[box, below=of n1] (n2) {Hybrid extractor: structured regex patterns + factual pattern flags};
+\node[box, below=of n2] (n3) {Extracted claims (some marked \texttt{requires\_external\_grounding})};
+\node[box, below=of n3] (n4) {Verifier: per-claim comparison against authoritative state};
+\node[side, right=of n4] (auth) {\textsc{AuthoritativeState}\\(evidence facts, or \emph{unavailable})};
+\node[box, below=of n4] (n5) {Claim evaluations: supported / contradicted / unsupported / partial / insufficient};
+\node[box, below=of n5] (n6) {Fail-closed policy $V(s,E)$ (Fig.~\ref{fig:hav-flow})};
+\node[box, below=of n6, fill=green!10] (n7)
+  {Verdict + ledger records: \texttt{Evidence}, \texttt{Claim}, \texttt{Verification},\\
+   \texttt{ActionProposal}, \texttt{PolicyDecision}, \texttt{HAVReceipt}};
+
+\draw[arr] (n1) -- (n2);
+\draw[arr] (n2) -- (n3);
+\draw[arr] (n3) -- (n4);
+\draw[arr] (auth) -- (n4);
+\draw[arr] (n4) -- (n5);
+\draw[arr] (n5) -- (n6);
+\draw[arr] (n6) -- (n7);
+\end{tikzpicture}%
+}
+\caption{HAV v0.2 verification pipeline. The authoritative state is supplied
+by the caller, not retrieved by HAV, and merges into the verifier stage; an
+unavailable state is itself a valid input that the fail-closed policy
+(Figure~\ref{fig:hav-flow}) maps to a blocking verdict.}
+\label{fig:hav-pipeline}
+\end{figure}
+
+\paragraph{Fail-closed policy.} A dedicated policy,
+\texttt{PHIGRAPH\_HAV\_FAIL\_CLOSED\_V1}, converts claim evaluations into one
+of five verdicts:
+
+\[
+V(s, E) =
+\begin{cases}
+\textsc{source\_unavailable} & \text{if the authoritative state } s \text{ is unavailable} \\
+\textsc{reject} & \text{if a critical claim in } E \text{ is contradicted} \\
+\textsc{human\_review} & \text{if a critical claim in } E \text{ lacks sufficient evidence} \\
+\textsc{warn} & \text{if any non-critical claim in } E \text{ is not supported} \\
+\textsc{pass} & \text{otherwise,}
+\end{cases}
+\]
+
+evaluated in the listed order, where $E$ is the set of claim evaluations for a
+request. Figure~\ref{fig:hav-flow} renders this evaluation order as a decision
+flowchart. Verdicts map onto the existing PhiGraph policy-decision effects of
+Section~\ref{sec:architecture} as shown in Table~\ref{tab:hav-mapping}; in
+particular, an unavailable authoritative source blocks the action rather than
+defaulting to a permissive outcome.
+
+\begin{figure}[H]
+\centering
+\resizebox{0.92\linewidth}{!}{%
+\begin{tikzpicture}[
+  node distance=7mm and 14mm,
+  decision/.style={draw, diamond, aspect=2.6, align=center, font=\scriptsize,
+    inner sep=1pt, fill=gray!10},
+  terminal/.style={draw, rounded corners=2pt, align=center, font=\scriptsize\bfseries,
+    minimum width=2.7cm, minimum height=0.75cm},
+  arr/.style={-{Latex[length=2mm]}, thick}
+]
+\node[decision] (d1) {authoritative state\\$s$ unavailable?};
+\node[terminal, fill=red!18, right=of d1] (t1) {SOURCE\_\\UNAVAILABLE};
+\node[decision, below=of d1] (d2) {critical claim\\contradicted?};
+\node[terminal, fill=red!18, right=of d2] (t2) {REJECT};
+\node[decision, below=of d2] (d3) {critical claim has\\insufficient evidence?};
+\node[terminal, fill=orange!18, right=of d3] (t3) {HUMAN\_REVIEW};
+\node[decision, below=of d3] (d4) {non-critical claim\\unsupported?};
+\node[terminal, fill=yellow!25, right=of d4] (t4) {WARN};
+\node[terminal, fill=green!18, below=of d4] (t5) {PASS};
+
+\draw[arr] (d1) -- node[above, font=\tiny] {yes} (t1);
+\draw[arr] (d1) -- node[right, font=\tiny] {no} (d2);
+\draw[arr] (d2) -- node[above, font=\tiny] {yes} (t2);
+\draw[arr] (d2) -- node[right, font=\tiny] {no} (d3);
+\draw[arr] (d3) -- node[above, font=\tiny] {yes} (t3);
+\draw[arr] (d3) -- node[right, font=\tiny] {no} (d4);
+\draw[arr] (d4) -- node[above, font=\tiny] {yes} (t4);
+\draw[arr] (d4) -- node[right, font=\tiny] {no} (t5);
+\end{tikzpicture}%
+}
+\caption{Decision flowchart for the fail-closed policy $V(s,E)$. Branches are
+evaluated top to bottom; the first matching condition determines the verdict,
+so an unavailable source always blocks regardless of claim content, and a
+fully supported claim set only reaches \textsc{pass} after every stricter
+condition fails.}
+\label{fig:hav-flow}
+\end{figure}
+
+\begin{table}[H]
+\centering
+\small
+\caption{Mapping from HAV verdicts to PhiGraph Core policy effects.}
+\label{tab:hav-mapping}
+\begin{tabular}{ll}
+\toprule
+HAV verdict & Core policy effect \\
+\midrule
+\textsc{pass} & \texttt{allow} \\
+\textsc{warn} & \texttt{warn} \\
+\textsc{reject} & \texttt{block} \\
+\textsc{human\_review} & \texttt{require\_approval} \\
+\textsc{source\_unavailable} & \texttt{block} \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\paragraph{Ledger integration and receipts.} For each request, HAV registers
+the supplied evidence facts as \texttt{Evidence} records, registers each
+extracted claim as a \texttt{Claim} record, records a \texttt{Verification}
+per claim, registers an \texttt{ActionProposal} representing acceptance of the
+candidate output, and records a \texttt{PolicyDecision} carrying the mapped
+effect. A \texttt{HAVReceipt} bundling the verdict, claim evaluations, and a
+SHA-256 hash of the candidate output is itself stored as ledger evidence and,
+when a receipt-signing key is configured, signed with the same HMAC-SHA256
+mechanism used elsewhere in Core. Tenant and project identifiers supplied with
+the request propagate to every record, consistent with the scope-tagging goal
+in Section~\ref{sec:systemmodel}.
+
+\paragraph{Security posture.} HAV never executes candidate output or any
+generated code; it only pattern-matches and compares strings. It does not
+persist a database file, and the packaged module contains no embedded
+credentials. The HTTP endpoints (\texttt{/v3/hav/verify},
+\texttt{/v3/hav/factual/extract}, \texttt{/v3/hav/consistency}) accept an
+optional \texttt{PHIGRAPH\_HAV\_API\_KEY}; when set, requests must present a
+matching \texttt{X-API-Key} header, compared using constant-time comparison,
+and are otherwise rejected. Multi-output consistency checking (shared-token
+overlap and conflicting status terms across several candidate outputs) is
+exposed only as an auxiliary diagnostic signal, not as a verification result
+on its own, and does not influence the policy decision above.
+
+\section{Evaluation}
+
+\subsection{Research questions}
+
+The evaluation addresses three bounded questions:
+
+\begin{description}[leftmargin=2.3cm,style=nextline]
+  \item[RQ1] Is the software version mechanically testable across its supported Python
+  versions and packaging paths?
+  \item[RQ2] Does the current relational anomaly score produce useful rankings
+  on one external network-flow benchmark relative to simple unsupervised
+  baselines?
+  \item[RQ3] Does the HAV fail-closed policy produce the intended blocking or
+  passing behavior on hand-constructed scenarios covering a contradicted
+  critical claim, an unavailable authoritative source, and a supported
+  numeric claim?
+\end{description}
+
+It does not test whether PhiGraph prevents all unsafe agent actions, proves
+causality, outperforms specialized state-of-the-art intrusion-detection
+systems, or measures HAV's claim-extraction accuracy against a labeled claim
+corpus.
+
+\subsection{Software verification}
+
+The software tree contains 128 automated tests: 117 core tests covering
+protocol records, ledger integrity, policy evaluation, runtime modes,
+persistence backends, API and SDK boundaries, agent workflows, graph
+operations, benchmarks, and deployment configuration, plus 11 HAV-specific
+tests covering claim extraction, connectors, the fail-closed policy, the API
+surface, and API-key enforcement. Continuous integration is configured to
+install the declared extras and run the suite on Python 3.10, 3.11, 3.12, and
+3.13; separate jobs build the Python distribution, install its wheel in an
+isolated environment, and build the Docker image. A local run on July 29, 2026
+executed all 128 tests successfully. A separate synthetic benchmark attempt
+under local Python 3.14, which is outside the CI matrix, stopped with an
+ARPACK eigensolver error and is excluded from the reported empirical results.
+Passing tests establish conformance to encoded cases, not correctness for all
+deployments.
+
+\subsection{HAV verification scenarios}
+\label{sec:hav-scenarios}
+
+To address RQ3, we exercised the running HAV API with three scenarios chosen
+to cover the fail-closed policy's distinguishing branches, in addition to the
+11 automated unit and integration tests. In the first, the candidate output
+asserts that all checks passed and the repository is production-ready while
+the supplied authoritative state marks CodeQL as failed and the release gate
+as blocked; the policy returned \textsc{reject}, mapped to a \texttt{block}
+policy decision recorded in the ledger. In the second, the authoritative
+source was marked unavailable; the policy returned
+\textsc{source\_unavailable}, also mapped to \texttt{block}, rather than
+defaulting to a permissive outcome. In the third, the candidate output
+correctly reports a numeric test count that matches the supplied evidence; the
+policy returned \textsc{pass}. All three outcomes matched the behavior implied
+by the policy definition in Section~\ref{sec:hav}. This is a confirmation of
+implemented decision logic on hand-constructed inputs, not a statistical
+evaluation of extraction accuracy, adversarial robustness, or coverage over
+naturally occurring agent output; the pattern-based extractor is not expected
+to generalize beyond the repository-status vocabulary encoded in its rules.
+
+\subsection{External anomaly-ranking experiment}
+
+The committed external-validation artifact uses the CIC-IDS2017 Friday
+afternoon DDoS flow file \cite{sharafaldin2018cicids}. It contains 225,745
+rows: 97,718 benign and 128,027 DDoS. With random seed 47, the protocol draws a
+12,000-row benign-only reference set and evaluates a balanced test set of
+6,000 benign and 6,000 DDoS flows. Preprocessing and variable-feature selection
+use only the benign reference. Methods are ranked continuously and evaluated
+at a top-10\% alert budget.
+
+The compared methods are robust multivariate deviation, Isolation Forest,
+Local Outlier Factor (LOF), and a PhiGraph relational score combining robust
+deviation, mean nearest-neighbor distance, and disagreement between their
+percentile ranks. Table
+\ref{tab:cicids} reproduces the committed result.
+
+\begin{table}[H]
+\centering
+\small
+\caption{CIC-IDS2017 Friday DDoS anomaly-ranking results. Runtime is reported
+by the committed validation artifact; its execution environment was not
+recorded.}
+\label{tab:cicids}
+\begin{tabular}{lrrrrrr}
+\toprule
+Method & ROC-AUC & PR-AUC & P@10\% & R@10\% & F1@10\% & Time (s)\\
+\midrule
+Local Outlier Factor & 0.9757 & 0.9506 & 0.9617 & 0.1923 & 0.3206 & 0.322\\
+PhiGraph relational  & 0.7295 & 0.7316 & 0.8400 & 0.1680 & 0.2800 & 0.165\\
+Isolation Forest     & 0.7403 & 0.6840 & 0.7817 & 0.1563 & 0.2606 & 0.321\\
+Robust deviation     & 0.5771 & 0.5540 & 0.4117 & 0.0823 & 0.1372 & 0.006\\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{figure}[H]
+\centering
+\begin{tikzpicture}
+\begin{axis}[
+  ybar,
+  bar width=9pt,
+  width=0.98\linewidth, height=6.2cm,
+  symbolic x coords={LOF,PhiGraph,IF,RD},
+  xtick=data,
+  xticklabels={Local Outlier Factor, PhiGraph relational, Isolation Forest, Robust deviation},
+  x tick label style={font=\scriptsize},
+  ymin=0, ymax=1.05,
+  ylabel={Score}, ylabel style={font=\small},
+  legend style={font=\scriptsize, at={(0.5,1.14)}, anchor=north, legend columns=-1, draw=none},
+  enlarge x limits=0.2,
+  nodes near coords, every node near coord/.append style={font=\tiny},
+  axis lines*=left,
+  tick align=outside,
+]
+\addplot[fill=blue!45] coordinates {(LOF,0.9506) (PhiGraph,0.7316) (IF,0.6840) (RD,0.5540)};
+\addplot[fill=orange!65] coordinates {(LOF,0.9617) (PhiGraph,0.8400) (IF,0.7817) (RD,0.4117)};
+\legend{PR-AUC, P@10\%}
+\end{axis}
+\end{tikzpicture}
+\caption{PR-AUC and precision at a 10\% alert budget for each method on the
+CIC-IDS2017 Friday DDoS experiment (same run as Table~\ref{tab:cicids}). Local
+Outlier Factor dominates on both metrics; the PhiGraph relational score ranks
+second, ahead of Isolation Forest and robust deviation.}
+\label{fig:cicids-bars}
+\end{figure}
+
+LOF is clearly strongest on this experiment. PhiGraph is second by PR-AUC and
+precision at budget, but its ROC-AUC is slightly below Isolation Forest.
+This single fixed experiment establishes only that the implementation produces
+a non-degenerate ranking under the reported protocol. It does not support a
+claim of general or state-of-the-art superiority.
+
+\section{Threats to Validity and Limitations}
+
+\paragraph{Dataset validity.}
+CIC-IDS2017 has documented problems in flow construction, feature generation,
+and labels \cite{liu2022errors,lanvin2022errors}. Results may change on
+corrected data. The machine-learning CSV also omits source and destination IP
+addresses, timestamps, users, devices, and processes. The evaluated graph is
+therefore a feature-similarity graph rather than the heterogeneous operational
+graph for which PhiGraph is designed.
+
+\paragraph{Experimental validity.}
+The external result uses one file, one attack family, one seed, and one alert
+budget. It reports no uncertainty intervals, ablation confidence intervals, or
+prospective evaluation. The benchmark is balanced and does not reproduce a
+production base rate. The PhiGraph score is batch-transductive because its
+component percentile ranks are calculated over the complete evaluation batch;
+scores can therefore change with batch composition and are not calibrated
+online anomaly scores. Additional chronological splits, repeated seeds,
+corrected datasets, heterogeneous event sources, and cost-sensitive metrics
+are required.
+
+\paragraph{Software validity.}
+Automated tests can encode incorrect assumptions and do not substitute for
+penetration testing, formal verification, independent replication, or
+operational incident analysis. The ledger's hash chain detects accidental or
+unauthorized changes only under an appropriate trust and key-management model.
+JSON and SQLite are evaluation backends; production use requires hardened
+storage, secrets management, authorization, monitoring, and backup procedures.
+
+\paragraph{HAV validity.}
+HAV's claim extractor is pattern- and rule-based, not a trained language or
+entailment model; its structured extractor recognizes a fixed vocabulary of
+repository-status phrasing in English and Spanish, and its factual extractor
+flags generic percentage, date, quantity, and attribution patterns without
+grounding them. Recall and precision on naturally occurring agent output are
+therefore unmeasured, and the three scenarios in Section~\ref{sec:hav-scenarios}
+are illustrative confirmations of policy logic, not a benchmark. Verification only compares
+extracted claims to caller-supplied evidence; HAV does not independently
+retrieve or authenticate that evidence, so an incorrect or manipulated
+authoritative state can still produce an incorrect verdict. Multi-output
+consistency checking is a lexical overlap heuristic and is explicitly
+documented as an auxiliary signal rather than proof of factual agreement.
+
+\paragraph{Causal and governance claims.}
+Graph connectivity, spectral structure, and anomaly scores do not identify
+causal effects without assumptions and suitable interventions. PhiGraph records
+candidate causal pathways but does not prove causality from observational data.
+Likewise, a recorded approval may still be mistaken or malicious. The platform
+improves inspectability and enforcement points; it does not guarantee ethical,
+legal, or correct outcomes.
+
+\section{Reproducibility and Availability}
+
+PhiGraph Core 4.0.0 is implemented in Python and distributed under the MIT
+License. Its development repository is maintained at
+\url{https://github.com/wcalmels/phigraph}. This paper is archived on Zenodo at
+\url{https://doi.org/10.5281/zenodo.21689514}. The paper source and references are
+licensed under CC BY 4.0.
+
+The software test suite can be reproduced with:
+
+\begin{verbatim}
+python -m venv .venv
+pip install -e ".[api,benchmark,dev,auth,app]"
+pytest
+\end{verbatim}
+
+The HAV-specific tests can be run in isolation with:
+
+\begin{verbatim}
+pytest tests/test_hav_core_integration.py tests/test_hav_api.py \
+       tests/test_hav_v02_connectors.py \
+       tests/test_hav_v02_factual_consistency.py \
+       tests/test_hav_v02_benchmark.py \
+       tests/test_hav_v02_api_security.py
+\end{verbatim}
+
+The CIC-IDS2017 experiment requires the Friday DDoS CSV and is run with:
+
+\begin{verbatim}
+python scripts/validate_cicids2017.py /path/to/Friday...DDos.csv
+\end{verbatim}
+
+The committed validation artifact records metrics and predictions but does not
+record the source-dataset checksum, exact dependency versions, hardware,
+operating system, or Git revision. It is therefore an auditable result artifact,
+not yet an exact reproducibility package. A final archive should preserve the
+dataset provenance and checksum, Python and dependency versions, seed,
+configuration, hardware description, and Git revision.
+The archival record is available at \url{https://doi.org/10.5281/zenodo.21689514}.
+
+\section{Ethical and Operational Considerations}
+
+PhiGraph can store sensitive evidence, identity metadata, and operational
+proposals. Deployers must minimize collection, define retention periods,
+encrypt transport and storage, separate tenant access, protect signing keys,
+and audit privileged operations. Security telemetry and network datasets may
+contain personal or confidential information and require an appropriate legal
+basis. The system should be evaluated in replay or shadow mode before any
+higher-authority integration. Human approval should remain mandatory where
+consequences are difficult to reverse or affect safety, rights, employment,
+finance, health, or critical infrastructure.
+
+\section{Conclusion}
+
+PhiGraph makes a specific architectural choice: intelligence does not imply
+authority. Claims must remain linked to evidence and verification; actions must
+remain subject to policy and explicit execution boundaries; outcomes must
+remain auditable. Version 4.0.0 demonstrates this design through a typed
+protocol, tamper-evident ledger, policy-gated runtime, scope-tagged records, and
+an automated test suite. HAV v0.2 extends the same design to a concrete
+instance of the problem: it treats agent-generated status claims as unverified
+until checked against an explicitly supplied authoritative state, and it fails
+closed, rather than open, when that state is unavailable. The external
+CIC-IDS2017 experiment shows a functional relational anomaly score but also
+illustrates why bounded interpretation is necessary: a conventional LOF
+baseline performs best, and the dataset cannot exercise PhiGraph's full
+heterogeneous graph model. Future work should prioritize independent
+replication, corrected and chronological security datasets, multi-source
+operational graphs, a trained or retrieval-based claim extractor evaluated
+against a labeled corpus, policy-adversarial testing, cryptographically
+anchored audit storage, and prospective shadow deployments.
+
+\section*{Author Contributions}
+
+Walter Calmels von Dem Knesebeck conceived the system, implemented the
+software, designed the evaluation, analyzed the results, and wrote the
+manuscript.
+
+\section*{Conflict of Interest}
+
+The author is affiliated with TUCH Systems, the organization developing
+PhiGraph. This relationship may create a commercial interest in the system.
+The evaluation and limitations are reported to enable independent scrutiny.
+
+\section*{License}
+
+This paper is licensed under the Creative Commons Attribution 4.0
+International License (CC BY 4.0).
+
+\bibliographystyle{plain}
+\bibliography{references}
+
+\end{document}
