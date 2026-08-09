@@ -293,3 +293,182 @@ def test_verify_scoped_chain_chain_metadata_tamper_fails(
     )
     with pytest.raises(LedgerIntegrityError):
         ledger.verify_scoped_chain()
+
+
+def _tamper_sqlite_column_only(
+    ledger,
+    *,
+    tenant_id: str,
+    project_id: str,
+    plan_id: str,
+    column: str,
+    value,
+) -> None:
+    backend = ledger.backend
+    with backend._lock, backend._connect() as conn:
+        conn.execute(
+            f"""
+            UPDATE phigraph_scoped_ledger
+            SET {column}=?
+            WHERE tenant_id=? AND project_id=? AND collection=? AND canonical_key=?
+            """,
+            (value, tenant_id, project_id, "shadow_execution_receipts", plan_id),
+        )
+        conn.commit()
+
+
+def _tamper_json_chain_linked_flag(ledger, *, tenant_id: str, project_id: str, plan_id: str) -> None:
+    state = ledger._scoped_engine._read_json_state()
+    key = f"{tenant_id}\0{project_id}\0shadow_execution_receipts\0{plan_id}"
+    state.records[key].chain_linked = False
+    ledger._scoped_engine._write_json_state(state)
+
+
+def _tamper_payload_hash(
+    ledger,
+    *,
+    tenant_id: str,
+    project_id: str,
+    collection: str,
+    canonical_key: str,
+) -> None:
+    if _uses_json_store(ledger):
+        state = ledger._scoped_engine._read_json_state()
+        key = f"{tenant_id}\0{project_id}\0{collection}\0{canonical_key}"
+        state.records[key].payload_hash = "badpayloadhash"
+        ledger._scoped_engine._write_json_state(state)
+        return
+    backend = ledger.backend
+    with backend._lock, backend._connect() as conn:
+        conn.execute(
+            """
+            UPDATE phigraph_scoped_ledger
+            SET payload_hash=?
+            WHERE tenant_id=? AND project_id=? AND collection=? AND canonical_key=?
+            """,
+            ("badpayloadhash", tenant_id, project_id, collection, canonical_key),
+        )
+        conn.commit()
+
+
+def _insert_invalid_orphan_head(
+    ledger,
+    *,
+    tenant_id: str,
+    project_id: str,
+    collection: str,
+    last_sequence: int,
+    last_chain_hash: str | None,
+) -> None:
+    if _uses_json_store(ledger):
+        state = ledger._scoped_engine._read_json_state()
+        state.heads[f"{tenant_id}\0{project_id}\0{collection}"] = {
+            "tenant_id": tenant_id,
+            "project_id": project_id,
+            "collection": collection,
+            "last_sequence": last_sequence,
+            "last_chain_hash": last_chain_hash,
+            "updated_at": "2026-01-01T00:00:00+00:00",
+        }
+        ledger._scoped_engine._write_json_state(state)
+        return
+    backend = ledger.backend
+    with backend._lock, backend._connect() as conn:
+        conn.execute(
+            """
+            INSERT INTO phigraph_chain_heads
+            (tenant_id, project_id, collection, last_sequence, last_chain_hash, updated_at)
+            VALUES (?, ?, ?, ?, ?, '2026-01-01T00:00:00+00:00')
+            """,
+            (tenant_id, project_id, collection, last_sequence, last_chain_hash),
+        )
+        conn.commit()
+
+
+def test_verify_scoped_chain_sqlite_chain_sequence_column_tamper_fails(sqlite_ledger):
+    ledger = sqlite_ledger()
+    _append_receipt(ledger, tenant_id="tenant-a", project_id="project-a", plan_id="plan_col_seq")
+    _tamper_sqlite_column_only(
+        ledger,
+        tenant_id="tenant-a",
+        project_id="project-a",
+        plan_id="plan_col_seq",
+        column="chain_sequence",
+        value=2,
+    )
+    with pytest.raises(LedgerIntegrityError, match="chain_sequence_mismatch"):
+        ledger.verify_scoped_chain()
+
+
+def test_verify_scoped_chain_sqlite_chain_prev_column_tamper_fails(sqlite_ledger):
+    ledger = sqlite_ledger()
+    _append_receipt(ledger, tenant_id="tenant-a", project_id="project-a", plan_id="plan_col_prev")
+    _tamper_sqlite_column_only(
+        ledger,
+        tenant_id="tenant-a",
+        project_id="project-a",
+        plan_id="plan_col_prev",
+        column="chain_prev",
+        value="badprev",
+    )
+    with pytest.raises(LedgerIntegrityError, match="chain_previous_hash_mismatch"):
+        ledger.verify_scoped_chain()
+
+
+def test_verify_scoped_chain_json_chain_linked_flag_tamper_fails(json_ledger):
+    ledger = json_ledger()
+    _append_receipt(ledger, tenant_id="tenant-a", project_id="project-a", plan_id="plan_flag")
+    _tamper_json_chain_linked_flag(
+        ledger,
+        tenant_id="tenant-a",
+        project_id="project-a",
+        plan_id="plan_flag",
+    )
+    with pytest.raises(LedgerIntegrityError, match="chain_linked_mismatch"):
+        ledger.verify_scoped_chain()
+
+
+@pytest.mark.parametrize("factory_name", ("json_ledger", "sqlite_ledger"))
+def test_verify_scoped_chain_payload_hash_tamper_fails(json_ledger, sqlite_ledger, factory_name, request):
+    factory = request.getfixturevalue(factory_name)
+    ledger = factory()
+    _append_receipt(ledger, tenant_id="tenant-a", project_id="project-a", plan_id="plan_payload_hash")
+    _tamper_payload_hash(
+        ledger,
+        tenant_id="tenant-a",
+        project_id="project-a",
+        collection="shadow_execution_receipts",
+        canonical_key="plan_payload_hash",
+    )
+    with pytest.raises(LedgerIntegrityError, match="payload_hash_mismatch"):
+        ledger.verify_scoped_chain()
+
+
+@pytest.mark.parametrize(
+    ("last_sequence", "last_chain_hash"),
+    (
+        (1, "deadbeef"),
+        (0, "deadbeef"),
+    ),
+)
+@pytest.mark.parametrize("factory_name", ("json_ledger", "sqlite_ledger"))
+def test_verify_scoped_chain_invalid_orphan_head_combinations_fail(
+    json_ledger,
+    sqlite_ledger,
+    factory_name,
+    request,
+    last_sequence,
+    last_chain_hash,
+):
+    factory = request.getfixturevalue(factory_name)
+    ledger = factory()
+    _insert_invalid_orphan_head(
+        ledger,
+        tenant_id="tenant-a",
+        project_id="project-a",
+        collection="shadow_execution_receipts",
+        last_sequence=last_sequence,
+        last_chain_hash=last_chain_hash,
+    )
+    with pytest.raises(LedgerIntegrityError, match="orphan_chain_head"):
+        ledger.verify_scoped_chain()

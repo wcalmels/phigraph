@@ -82,6 +82,7 @@ class _ChainRowView:
     chain_hash: str
     payload: dict[str, Any]
     chain_linked: bool
+    payload_hash: str | None = None
 
 
 @dataclass(frozen=True)
@@ -119,6 +120,16 @@ def _validate_chain_metadata(row: _ChainRowView) -> None:
         raise LedgerIntegrityError(f"chain_hash_mismatch:{scope}:{row.chain_sequence}")
     if chain.get("linked") is not row.chain_linked:
         raise LedgerIntegrityError(f"chain_linked_mismatch:{scope}:{row.chain_sequence}")
+    if row.payload_hash is not None:
+        expected_hash = canonical_scoped_payload_hash(row.payload)
+        if row.payload_hash != expected_hash:
+            raise LedgerIntegrityError(f"payload_hash_mismatch:{scope}:{row.chain_sequence}")
+
+
+def _invalid_orphan_head(head: _ChainHeadView) -> bool:
+    if head.last_sequence > 0:
+        return True
+    return head.last_sequence == 0 and head.last_chain_hash is not None
 
 
 def _validate_linked_chain_group(
@@ -136,6 +147,9 @@ def _validate_linked_chain_group(
         return 0
 
     sorted_rows = sorted(rows, key=lambda row: row.chain_sequence)
+    for row in sorted_rows:
+        _validate_chain_metadata(row)
+
     sequences = [row.chain_sequence for row in sorted_rows]
     if sequences[0] != 1:
         raise LedgerIntegrityError(f"chain_sequence_gap:{scope}:expected_start_1")
@@ -147,7 +161,6 @@ def _validate_linked_chain_group(
 
     expected_prev: str | None = None
     for row in sorted_rows:
-        _validate_chain_metadata(row)
         if row.chain_prev != expected_prev:
             raise LedgerIntegrityError(f"chain_prev mismatch:{scope}:{row.chain_sequence}")
         expected_hash = chain_record_hash(
@@ -176,13 +189,17 @@ def _validate_standalone_row(row: _ChainRowView) -> None:
         raise LedgerIntegrityError(f"chain_linked_mismatch:{scope}")
     if chain.get("sequence") != row.chain_sequence:
         raise LedgerIntegrityError(f"chain_sequence_mismatch:{scope}:{row.chain_sequence}")
-    if chain.get("previous_hash") is not None:
+    if chain.get("previous_hash") != row.chain_prev:
         raise LedgerIntegrityError(f"chain_previous_hash_mismatch:{scope}:{row.chain_sequence}")
     expected_hash = _standalone_row_hash(row.collection, row.payload)
     if row.chain_hash != expected_hash:
         raise LedgerIntegrityError(f"chain_hash mismatch:{scope}:{row.chain_sequence}")
     if chain.get("hash") != row.chain_hash:
         raise LedgerIntegrityError(f"chain_hash_mismatch:{scope}:{row.chain_sequence}")
+    if row.payload_hash is not None:
+        expected_payload_hash = canonical_scoped_payload_hash(row.payload)
+        if row.payload_hash != expected_payload_hash:
+            raise LedgerIntegrityError(f"payload_hash_mismatch:{scope}:{row.chain_sequence}")
 
 
 def _scoped_key(tenant_id: str, project_id: str, collection: str, canonical_key: str) -> str:
@@ -1060,7 +1077,8 @@ class ScopedLedgerEngine:
                     chain_prev=row.chain_prev,
                     chain_hash=row.chain_hash,
                     payload=row.payload,
-                    chain_linked=True,
+                    chain_linked=row.chain_linked,
+                    payload_hash=row.payload_hash,
                 )
             )
 
@@ -1108,7 +1126,7 @@ class ScopedLedgerEngine:
                 last_sequence=int(head_raw.get("last_sequence", 0)),
                 last_chain_hash=head_raw.get("last_chain_hash"),
             )
-            if head.last_sequence > 0:
+            if _invalid_orphan_head(head):
                 raise LedgerIntegrityError(f"orphan_chain_head:{t_id}/{p_id}/{coll}")
 
         standalone_checked = 0
@@ -1133,6 +1151,7 @@ class ScopedLedgerEngine:
                 chain_hash=row.chain_hash,
                 payload=row.payload,
                 chain_linked=row.chain_linked,
+                payload_hash=row.payload_hash,
             )
             _validate_standalone_row(view)
             standalone_checked += 1
@@ -1155,7 +1174,7 @@ class ScopedLedgerEngine:
         for coll in linked_collections:
             query = (
                 "SELECT tenant_id, project_id, collection, canonical_key, payload, "
-                "chain_prev, chain_hash, chain_sequence FROM phigraph_scoped_ledger "
+                "payload_hash, chain_prev, chain_hash, chain_sequence FROM phigraph_scoped_ledger "
                 "WHERE collection=?"
             )
             params: list[Any] = [coll]
@@ -1166,7 +1185,7 @@ class ScopedLedgerEngine:
                 query += " AND project_id=?"
                 params.append(project_id)
             query += " ORDER BY tenant_id, project_id, collection, chain_sequence"
-            for t_id, p_id, coll_name, _, payload_raw, chain_prev, chain_hash, chain_sequence in conn.execute(
+            for t_id, p_id, coll_name, _, payload_raw, payload_hash, chain_prev, chain_hash, chain_sequence in conn.execute(
                 query, params
             ).fetchall():
                 payload = json.loads(payload_raw)
@@ -1180,6 +1199,7 @@ class ScopedLedgerEngine:
                         chain_hash=chain_hash,
                         payload=payload,
                         chain_linked=True,
+                        payload_hash=payload_hash,
                     )
                 )
 
@@ -1217,13 +1237,20 @@ class ScopedLedgerEngine:
             if project_id is not None:
                 head_query += " AND project_id=?"
                 head_params.append(project_id)
-            for t_id, p_id, coll_name, last_sequence, _ in conn.execute(head_query, head_params).fetchall():
+            for t_id, p_id, coll_name, last_sequence, last_chain_hash in conn.execute(head_query, head_params).fetchall():
                 if (t_id, p_id, coll_name) in seen_heads:
                     continue
-                if int(last_sequence) > 0:
+                head = _ChainHeadView(
+                    last_sequence=int(last_sequence),
+                    last_chain_hash=last_chain_hash,
+                )
+                if _invalid_orphan_head(head):
                     raise LedgerIntegrityError(f"orphan_chain_head:{t_id}/{p_id}/{coll_name}")
 
-        mutable_query = "SELECT tenant_id, project_id, collection, payload, chain_hash FROM phigraph_scoped_ledger WHERE 1=1"
+        mutable_query = (
+            "SELECT tenant_id, project_id, collection, payload, payload_hash, "
+            "chain_prev, chain_hash, chain_sequence FROM phigraph_scoped_ledger WHERE 1=1"
+        )
         mutable_params: list[Any] = []
         if collection is not None:
             mutable_query += " AND collection=?"
@@ -1235,7 +1262,9 @@ class ScopedLedgerEngine:
             mutable_query += " AND project_id=?"
             mutable_params.append(project_id)
         standalone_checked = 0
-        for t_id, p_id, coll, payload_raw, chain_hash in conn.execute(mutable_query, mutable_params):
+        for t_id, p_id, coll, payload_raw, payload_hash, chain_prev, chain_hash, chain_sequence in conn.execute(
+            mutable_query, mutable_params
+        ):
             if coll in CHAIN_LINKED_COLLECTIONS:
                 continue
             payload = json.loads(payload_raw)
@@ -1243,11 +1272,12 @@ class ScopedLedgerEngine:
                 tenant_id=t_id,
                 project_id=p_id,
                 collection=coll,
-                chain_sequence=int(payload.get("_chain", {}).get("sequence", 0)),
-                chain_prev=None,
+                chain_sequence=int(chain_sequence),
+                chain_prev=chain_prev,
                 chain_hash=chain_hash,
                 payload=payload,
                 chain_linked=False,
+                payload_hash=payload_hash,
             )
             _validate_standalone_row(view)
             standalone_checked += 1
