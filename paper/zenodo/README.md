@@ -15,9 +15,9 @@ Ready-to-upload artifacts for a **new version** of [10.5281/zenodo.21689514](htt
 
 ## What changed in this draft
 
-- **§4.3** Transactional scoped ledger (Core 4.1.0-rc.6) + **Figure 6**
-- **Figure 7** Chain-linked GRDI vs mutable Core collections
-- **§4.6** GRDI shadow decision chain (GRDI 0.4.0) + **Figure 8**
+- **§4.3** Transactional scoped ledger (Core 4.1.0-rc.6) + **Figures 6–7, 9**
+- **Figure 1** Architecture updated (scoped store, HAV, GRDI)
+- **§4.5–4.7** HAV → GRDI → API subsection order
 - **§5.4** Transactional ledger integrity (57 contract tests)
 - **§5.5** GRDI replay audit scenarios
 - Software verification updated to **319 tests** (`main@a5a7187`)

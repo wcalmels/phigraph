@@ -109,12 +109,12 @@ This paper makes seven contributions:
   \item a scoped transactional store (Core~4.1) with declared write locks,
         idempotent append-once semantics, and fail-closed chain verification
         on JSON and SQLite backends;
-  \item GRDI~0.4.0, a persisted shadow decision chain from HAV-linked envelopes
-        through authority, simulated gateway receipts, outcomes, and replay
-        audit, without external execution in the current release;
   \item HAV~v0.2, a fail-closed extension that verifies agent-generated
         textual claims against an authoritative external state and records
-        the result through the same protocol and ledger; and
+        the result through the same protocol and ledger;
+  \item GRDI~0.4.0, a persisted shadow decision chain from HAV-linked envelopes
+        through authority, simulated gateway receipts, outcomes, and replay
+        audit, without external execution in the current release; and
   \item a bounded empirical evaluation comprising software verification and an
         external anomaly-ranking experiment, together with explicit threats to
         validity.
@@ -210,44 +210,59 @@ PhiGraph is designed around six goals:
 \centering
 \resizebox{\linewidth}{!}{%
 \begin{tikzpicture}[
-  node distance=6mm and 6mm,
+  node distance=5mm and 3mm,
   every node/.style={font=\small},
-  box/.style={draw, rounded corners=2pt, align=center, minimum height=0.9cm, inner sep=5pt},
+  box/.style={draw, rounded corners=2pt, align=center, minimum height=0.82cm, inner sep=4pt},
   lbl/.style={font=\small\bfseries},
-  arr/.style={-{Latex[length=2.4mm]}, thick}
+  arr/.style={-{Latex[length=2.4mm]}, thick},
+  darr/.style={-{Latex[length=2.2mm]}, thick, dashed, gray!70!black}
 ]
 
-\node[box, fill=blue!10, minimum width=8.6cm] (agent) {Agent or deterministic adapter};
+\node[box, fill=blue!10, minimum width=9.4cm] (agent) {Agent or deterministic adapter};
 
-\node[lbl, below=8mm of agent] (protolbl) {Protocol layer};
-\node[box, fill=green!8, minimum width=8.6cm, below=1mm of protolbl] (claimrow)
+\node[lbl, below=6mm of agent] (protolbl) {Protocol layer (2.0.0)};
+\node[box, fill=green!8, minimum width=9.4cm, below=1mm of protolbl] (claimrow)
   {Claim $\leftrightarrow$ Evidence $\leftrightarrow$ Verification};
-\node[box, fill=green!8, minimum width=8.6cm, below=2mm of claimrow] (actionrow)
+\node[box, fill=green!8, minimum width=9.4cm, below=2mm of claimrow] (actionrow)
   {ActionProposal $\leftrightarrow$ PolicyDecision $\leftrightarrow$ Outcome};
 
-\node[lbl, below=8mm of actionrow] (corelbl) {Core service};
-\node[box, fill=orange!12, minimum width=2.0cm, below=1mm of corelbl, anchor=north, xshift=-3.25cm] (ledger)
-  {Evidence\\ledger};
-\node[box, fill=orange!12, minimum width=2.0cm, right=3mm of ledger] (policy) {Policy\\engine};
-\node[box, fill=orange!12, minimum width=2.0cm, right=3mm of policy] (runtime) {Runtime};
-\node[box, fill=orange!12, minimum width=2.0cm, right=3mm of runtime] (telemetry) {Telemetry};
+\node[lbl, below=6mm of actionrow] (corelbl) {Core service};
+\node[box, fill=orange!12, minimum width=2.1cm, below=1mm of corelbl, anchor=north, xshift=-3.4cm] (store)
+  {Scoped\\transactional\\store};
+\node[box, fill=orange!12, minimum width=1.8cm, right=2mm of store] (policy) {Policy\\engine};
+\node[box, fill=orange!12, minimum width=1.8cm, right=2mm of policy] (runtime) {Runtime};
+\node[box, fill=orange!12, minimum width=1.8cm, right=2mm of runtime] (telemetry) {Telemetry};
 
-\node[lbl, below=8mm of ledger, xshift=3.25cm] (deploylbl) {Deployment boundary};
-\node[box, fill=red!8, minimum width=4.2cm, below=1mm of deploylbl, anchor=north, xshift=-2.2cm] (shadow)
+\node[lbl, below=6mm of store, xshift=2.05cm] (extlbl) {Extension modules};
+\node[box, fill=purple!10, minimum width=3.9cm, below=1mm of extlbl, anchor=north, xshift=-2.05cm] (hav)
+  {HAV v0.2\\(verification client)};
+\node[box, fill=purple!10, minimum width=3.9cm, right=3mm of hav] (grdi)
+  {GRDI 0.4.0\\(shadow decision chain)};
+
+\node[lbl, below=6mm of hav, xshift=2.05cm] (deploylbl) {Deployment boundary};
+\node[box, fill=red!8, minimum width=4.1cm, below=1mm of deploylbl, anchor=north, xshift=-2.15cm] (shadow)
   {Replay / Shadow\\(non-executing)};
-\node[box, fill=red!8, minimum width=4.2cm, right=3mm of shadow] (guarded)
+\node[box, fill=red!8, minimum width=4.1cm, right=3mm of shadow] (guarded)
   {Copilot / Guarded-auto\\(explicit executor)};
 
 \draw[arr] (agent.south) -- (protolbl.north)
-  node[midway, right, font=\scriptsize, align=left] {proposal:\\claims \& actions};
+  node[midway, right, font=\scriptsize, align=left] {proposals:\\claims \& actions};
 \draw[arr] (actionrow.south) -- (corelbl.north);
-\draw[arr] ($(ledger.south)!0.5!(telemetry.south)$) -- (deploylbl.north);
+\draw[darr] (claimrow.east) -- ++(4mm,0) |- (hav.east)
+  node[near start, right, font=\scriptsize, align=left] {candidate\\text};
+\draw[arr] (hav.west) -| (store.south);
+\draw[arr] (grdi.north) -- (store.south -| grdi.north);
+\draw[arr] ($(store.south)!0.5!(telemetry.south)$) -- (extlbl.north);
+\draw[arr] (runtime.south) -- ++(0,-2mm) -| (shadow.north);
+\draw[arr] (runtime.south) -- ++(0,-2mm) -| (guarded.north);
 
 \end{tikzpicture}%
 }
 \caption{PhiGraph separates agent proposals from verification, policy
-evaluation, and execution. Arrows indicate recorded processing relationships,
-not automatic trust propagation.}
+evaluation, and execution. Core~4.1 persists scope-tagged records through a
+transactional store; HAV verifies candidate text against supplied state; GRDI
+appends a shadow decision chain through the same store. Arrows indicate
+recorded processing relationships, not automatic trust propagation.}
 \label{fig:architecture}
 \end{figure}
 
@@ -347,15 +362,14 @@ and independent audit anchors.
 \label{sec:transactional-ledger}
 
 Core~4.1.0-rc.6 adds a \emph{scoped transactional} persistence layer for
-multi-tenant deployments. Business records are keyed by
-\((\mathit{tenant\_id}, \mathit{project\_id}, \mathit{collection},
-\mathit{canonical\_key})\) and stored with an explicit payload hash,
-chain metadata, and row version. The public API exposes
+multi-tenant deployments. Business records are keyed by tenant, project,
+collection, and canonical business key, and stored with an explicit payload
+hash, chain metadata, and row version. The public API exposes
 \texttt{append\_scoped}, \texttt{append\_scoped\_once}, \texttt{get\_scoped},
 \texttt{list\_scoped}, \texttt{compare\_and\_set\_scoped}, and
-\texttt{run\_scoped\_transaction}. A separate
-\texttt{verify\_scoped\_chain} operation recomputes hashes, chain continuity,
-and chain-head consistency without repairing data.
+\texttt{run\_scoped\_transaction}. A separate \texttt{verify\_scoped\_chain}
+operation recomputes hashes, chain continuity, and chain-head consistency
+without repairing data.
 
 \paragraph{Write locks.} Every mutating call inside a transaction must declare
 its locks up front. A \emph{chain lock} covers an entire scoped collection and
@@ -366,22 +380,24 @@ touches a key without the matching declared lock, the engine raises
 in a global order (tenant, project, collection, kind, key) before acquisition
 to reduce deadlock risk across concurrent workers.
 
-\paragraph{Atomic transactions.} \texttt{run\_scoped\_transaction} accepts a
-callback that performs multiple scoped operations under one commit boundary.
-On the JSON backend, writes are staged in thread-local state and flushed on
-success; \texttt{transactional\_mode=multiprocess} is rejected fail-closed
-because cross-process file locking is not provided. On SQLite, the engine uses
+\paragraph{Atomic transactions.}
+\texttt{run\_scoped\_transaction} accepts a callback that performs multiple
+scoped operations under one commit boundary. On the JSON backend, writes are
+staged in thread-local state and flushed on success;
+\texttt{transactional\_mode=multiprocess} is rejected fail-closed because
+cross-process file locking is not provided. On SQLite, the engine uses
 \texttt{BEGIN IMMEDIATE} with scoped tables \texttt{phigraph\_scoped\_ledger}
 and \texttt{phigraph\_chain\_heads}. A callback failure or commit error rolls
 back staged state and clears transaction context.
 
-\paragraph{Integrity verification.} \texttt{verify\_scoped\_chain} groups rows
-by scope and collection, validates that internal columns match each record's
-\texttt{\_chain} metadata, checks payload hashes, detects missing or orphan
-chain heads, and rejects sequence gaps. The check is \emph{fail-closed}: any
-tamper or inconsistency raises \texttt{LedgerIntegrityError}. This behavior is
-\emph{implemented} for JSON and SQLite in the current release; a PostgreSQL
-backend with the same semantics is \emph{specified} but not yet shipped.
+\paragraph{Integrity verification.}
+\texttt{verify\_scoped\_chain} groups rows by scope and collection, validates
+that internal columns match each record's \texttt{\_chain} metadata, checks
+payload hashes, detects missing or orphan chain heads, and rejects sequence
+gaps. The check is \emph{fail-closed}: any tamper or inconsistency raises
+\texttt{LedgerIntegrityError}. This behavior is \emph{implemented} for JSON
+and SQLite in the current release; a PostgreSQL backend with the same semantics
+is \emph{specified} but not yet shipped.
 
 Figure~\ref{fig:scoped-transaction} summarizes the transaction boundary and
 lock declaration requirement.
@@ -483,6 +499,49 @@ mutable Core collections support conditional updates without chain linking.}
 \label{fig:chain-mutable}
 \end{figure}
 
+Figure~\ref{fig:verify-scoped-chain} summarizes the fail-closed read path.
+
+\begin{figure}[H]
+\centering
+\resizebox{\linewidth}{!}{%
+\begin{tikzpicture}[
+  node distance=4mm and 5mm,
+  every node/.style={font=\small},
+  box/.style={draw, rounded corners=2pt, align=center, inner sep=3pt, minimum height=0.75cm},
+  chk/.style={box, fill=yellow!12, minimum width=2.35cm, font=\scriptsize},
+  arr/.style={-{Latex[length=2mm]}, thick},
+  fail/.style={box, fill=red!12, minimum width=2.6cm, font=\scriptsize\bfseries}
+]
+
+\node[box, fill=blue!8, minimum width=2.4cm] (in) {Scoped rows\\by collection};
+\node[chk, right=of in] (hash) {Payload\\hash match};
+\node[chk, right=of hash] (meta) {\texttt{\_chain}\\column match};
+\node[chk, right=of meta] (head) {Head pointer\\consistency};
+\node[chk, right=of head] (seq) {Sequence\\continuity};
+\node[box, fill=green!12, minimum width=2.2cm, right=of seq] (ok) {OK};
+\node[fail, below=6mm of head] (err) {LedgerIntegrity\\Error};
+
+\draw[arr] (in) -- (hash);
+\draw[arr] (hash) -- (meta);
+\draw[arr] (meta) -- (head);
+\draw[arr] (head) -- (seq);
+\draw[arr] (seq) -- (ok);
+\foreach \n in {hash, meta, head, seq} {
+  \draw[arr, red!60!black] (\n.south) -- ++(0,-2mm) -| (err.north);
+}
+
+\node[font=\tiny, align=center, anchor=north] at ($(err.south)+(0,-1mm)$) {
+  missing/orphan head, gap, or tamper $\rightarrow$ fail-closed (no repair)
+};
+
+\end{tikzpicture}%
+}
+\caption{\texttt{verify\_scoped\_chain} recomputes hashes and chain metadata,
+checks head pointers and sequence continuity, and raises
+\texttt{LedgerIntegrityError} on any inconsistency.}
+\label{fig:verify-scoped-chain}
+\end{figure}
+
 \subsection{Policy-gated runtime}
 
 The policy engine matches action type, permitted runtime modes, maximum risk,
@@ -501,18 +560,6 @@ it defaults to shadow-only operation, rejects attempts to disable that
 boundary, and disables real connectors. The core abstractions expose
 higher-authority modes for controlled future integration, but the supplied
 deployment does not grant arbitrary external execution.
-
-\subsection{API, SDK, and operations}
-
-The Python SDK can send tenant and project headers, API-key or bearer
-credentials, and idempotency keys. Authentication, PostgreSQL persistence, and
-signing are supported by lower-level Core components when explicitly
-configured. The packaged application does not currently wire every one of
-these options into the Core v3 router. Its Docker configuration must therefore
-be treated as a local evaluation setup unless protected by an external
-authentication and network boundary. Scope headers are application metadata
-and query filters; the present implementation does not provide end-to-end
-tenant isolation or same-scope referential-integrity guarantees.
 
 \subsection{Human-Assisted Verification (HAV v0.2)}
 \label{sec:hav}
@@ -690,25 +737,26 @@ shadow receipts, outcomes, and deterministic replay audit. GRDI writes only
 through the scoped transactional API in Section~\ref{sec:transactional-ledger}
 and never invokes external connectors or live executors in the current release.
 
-\paragraph{State separation.} Verification (\texttt{VERIFIED} /
-\texttt{NOT\_VERIFIED}), authorization (\texttt{AUTHORIZED} /
-\texttt{NOT\_AUTHORIZED} / \texttt{REQUIRES\_APPROVAL}), and execution
-(\texttt{NOT\_EXECUTED} throughout Foundation and shadow increments) are
-stored as distinct fields. A passing HAV receipt does not by itself authorize
-an action; an authorized envelope does not imply that an external action was
-executed. The shadow execution gateway may record \texttt{SIMULATED} plans and
-signed receipts while preserving \texttt{execution\_state=NOT\_EXECUTED}.
+\paragraph{State separation.}
+Verification (\texttt{VERIFIED} / \texttt{NOT\_VERIFIED}), authorization
+(\texttt{AUTHORIZED}, \texttt{NOT\_AUTHORIZED}, or
+\texttt{REQUIRES\_APPROVAL}), and execution (\texttt{NOT\_EXECUTED}
+throughout Foundation and shadow increments) are stored as distinct fields.
+A passing HAV receipt does not by itself authorize an action; an authorized
+envelope does not imply that an external action was executed. The shadow
+execution gateway may record \texttt{SIMULATED} plans and signed receipts
+while preserving \texttt{execution\_state=NOT\_EXECUTED}.
 
-\paragraph{Persisted chain.} A typical shadow path appends, in order:
-\texttt{DecisionEnvelope} (HAV receipt and proposed action),
-\texttt{AuthorityDecision}, \texttt{ExecutionRequest},
-\texttt{GatewayDecision}, optional \texttt{GatewayDecisionEvent},
-\texttt{ShadowExecutionReceipt}, and \texttt{ShadowOutcomeRecord}. Replay
-audit appends \texttt{ReplayReport} and \texttt{HistoricalComparison}
-records that re-verify the stored chain without re-running simulation or
-authority evaluation. Invalid signatures, scope mismatches, or broken links
-fail closed into explicit \texttt{INVALID} or \texttt{INCOMPLETE} replay
-states; replay never calls chain repair routines.
+\paragraph{Persisted chain.}
+A typical shadow path appends, in order: a \texttt{DecisionEnvelope} (HAV
+receipt and proposed action), an \texttt{AuthorityDecision}, an
+\texttt{ExecutionRequest}, a \texttt{GatewayDecision}, an optional
+\texttt{GatewayDecisionEvent}, a \texttt{ShadowExecutionReceipt}, and a
+\texttt{ShadowOutcomeRecord}. Replay audit appends \texttt{ReplayReport} and
+\texttt{HistoricalComparison} records that re-verify the stored chain without
+re-running simulation or authority evaluation. Invalid signatures, scope
+mismatches, or broken links fail closed into explicit \texttt{INVALID} or
+\texttt{INCOMPLETE} replay states; replay never calls chain repair routines.
 
 Figure~\ref{fig:grdi-pipeline} shows the end-to-end shadow flow implemented
 on \texttt{main} at Core~4.1.0-rc.6. External execution and PostgreSQL-scoped
@@ -753,6 +801,22 @@ Replay audit reads and verifies history without invoking connectors or
 re-running simulation.}
 \label{fig:grdi-pipeline}
 \end{figure}
+
+\subsection{API, SDK, and operations}
+\label{sec:api}
+
+The Python SDK can send tenant and project headers, API-key or bearer
+credentials, and idempotency keys. Authentication, PostgreSQL persistence, and
+signing are supported by lower-level Core components when explicitly
+configured. The packaged application does not currently wire every one of
+these options into the Core v3 router. Its Docker configuration must therefore
+be treated as a local evaluation setup unless protected by an external
+authentication and network boundary. Scope headers are application metadata
+and query filters; the present implementation does not provide end-to-end
+tenant isolation or same-scope referential-integrity guarantees. HAV and GRDI
+HTTP surfaces inherit the same deployment boundary: optional API keys on HAV
+routes, shadow-default runtime configuration, and no live connector execution
+in the packaged stack.
 
 \section{Evaluation}
 
@@ -825,8 +889,8 @@ append-once under concurrency, undeclared-lock rejection, thread-local JSON
 transaction isolation, compare-and-set on mutable Core collections without
 breaking append-only GRDI chains, commit-failure cleanup, and adversarial
 \texttt{verify\_scoped\_chain} cases (missing heads, orphan heads, sequence
-gaps, column tampering, and coordinated metadata manipulation). These tests
-establish \emph{implemented} integrity behavior for the shipped backends; they
+gaps, column tampering, and coordinated metadata manipulation; see
+Figure~\ref{fig:verify-scoped-chain}). These tests establish \emph{implemented} integrity behavior for the shipped backends; they
 do not prove security against a privileged attacker with signing keys and
 unrestricted storage access.
 
@@ -944,12 +1008,11 @@ storage, secrets management, authorization, monitoring, and backup procedures.
 
 \paragraph{Transactional ledger validity.}
 The scoped transactional API is implemented for JSON (single-process staging)
-and SQLite (\texttt{BEGIN IMMEDIATE}). JSON rejects
-\texttt{transactional\_mode=multiprocess} fail-closed. A PostgreSQL backend
-with the same semantics is specified but not shipped in Core~4.1.0-rc.6.
-Contract tests establish integrity checks for the released backends; they do
-not prove Byzantine fault tolerance or safety under a compromised signing key
-and unrestricted storage access.
+and SQLite (\texttt{BEGIN IMMEDIATE}). JSON rejects multiprocess transactional
+mode fail-closed. A PostgreSQL backend with the same semantics is specified
+but not shipped in Core~4.1.0-rc.6. Contract tests establish integrity checks
+for the released backends; they do not prove Byzantine fault tolerance or
+safety under a compromised signing key and unrestricted storage access.
 
 \paragraph{GRDI and replay validity.}
 GRDI records a shadow decision chain with explicit \texttt{NOT\_EXECUTED}
