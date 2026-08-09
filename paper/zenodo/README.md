@@ -8,6 +8,7 @@ Ready-to-upload artifacts for a **new version** of [10.5281/zenodo.21689514](htt
 |------|-----|
 | `PhiGraph_Paper_v2_draft.pdf` | **Primary** publication (all TikZ figures, incl. Fig. 6 scoped transaction) |
 | `PhiGraph_Paper_v2_draft.docx` | Accessible text export (figures PDF-only) |
+| `PhiGraph_Paper_v2_readable.md` | Plain-text reading copy (figures omitted) |
 | `main.tex` | LaTeX source |
 | `references.bib` | Bibliography |
 | `LICENSE.md` | CC BY 4.0 |

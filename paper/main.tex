@@ -56,7 +56,8 @@ authoritative state. Replay and shadow modes cannot execute external actions,
 while higher-authority modes require both an explicit executor and an allowing
 policy decision. Engineering verification comprises 319 automated tests on
 \texttt{main@a5a7187} (262 baseline, 57 scoped transactional contract, and 11
-HAV-specific tests); continuous integration targets Python~3.10--3.13. An
+HAV-specific tests), including scoped-integrity, idempotent append-once, and
+GRDI replay-audit cases; continuous integration targets Python~3.10--3.13. An
 initial external experiment on the CIC-IDS2017 Friday DDoS flow file compares a
 PhiGraph relational score with three unsupervised baselines. Local Outlier
 Factor is strongest on this tabular benchmark; PhiGraph ranks second by PR-AUC
@@ -291,13 +292,16 @@ require approval, and block. These states make uncertainty and governance
 decisions explicit instead of collapsing them into a single confidence score.
 The current implementation does not require a non-empty evidence set for every
 verified claim and does not assess evidentiary sufficiency. This is an
-enforcement gap, not a guarantee supplied by the protocol. Figure
+enforcement gap, not a guarantee supplied by the protocol. In Core~4.1, each
+record type maps to a tenant- and project-scoped collection: protocol records
+use mutable scoped rows, while GRDI stages use chain-linked append-only
+collections (Section~\ref{sec:transactional-ledger}). Figure
 \ref{fig:protocol-lifecycle} shows how the six record types reference one
 another across a full claim-to-outcome cycle.
 
 \begin{figure}[H]
 \centering
-\resizebox{0.56\linewidth}{!}{%
+\resizebox{0.58\linewidth}{!}{%
 \begin{tikzpicture}[
   every node/.style={font=\small},
   rec/.style={draw, rounded corners=2pt, align=center, fill=blue!8, minimum width=2.6cm, minimum height=0.9cm, inner sep=3pt},
@@ -321,6 +325,11 @@ another across a full claim-to-outcome cycle.
 \draw[arr] (policy) -- (outcome);
 \draw[darr] (outcome) to[bend left=18]
   node[midway, sloped, below, font=\scriptsize] {observed effects} (evidence);
+
+\node[font=\scriptsize, align=center, text=gray!55!black] at (0,-4.35) {
+  scoped collections (tenant / project)\\
+  mutable Core rows; chain-linked GRDI stages
+};
 \end{tikzpicture}%
 }
 \caption{The protocol's recorded lifecycle. Solid arrows show synchronous
@@ -328,7 +337,8 @@ references (a verification cites claims and evidence; an action proposal
 cites rationale claims; a policy decision governs a proposal; an outcome
 follows a decision). Dashed arrows show asynchronous feedback: a verification
 updates claim status, and an outcome's observed effects may be registered as
-new evidence for future claims. The cycle is auditable, not automatic --
+new evidence for future claims. Under Core~4.1, each record type is persisted
+in a scope-tagged collection. The cycle is auditable, not automatic --
 each edge corresponds to an explicit recorded reference, not an implicit
 trust relationship.}
 \label{fig:protocol-lifecycle}
@@ -821,28 +831,34 @@ in the packaged stack.
 
 \subsection{Research questions}
 
-The evaluation addresses three bounded questions:
+The evaluation addresses five bounded questions:
 
 \begin{description}[leftmargin=2.3cm,style=nextline]
-  \item[RQ1] Is the software version mechanically testable across its supported Python
-  versions and packaging paths?
-  \item[RQ2] Does the current relational anomaly score produce useful rankings
-  on one external network-flow benchmark relative to simple unsupervised
-  baselines?
-  \item[RQ3] Does the HAV fail-closed policy produce the intended blocking or
+  \item[RQ1] Is the software version mechanically testable across its supported
+  Python versions and packaging paths?
+  \item[RQ2] Do the scoped transactional backends enforce declared write locks,
+  idempotent append-once semantics, and fail-closed
+  \texttt{verify\_scoped\_chain} behavior on JSON and SQLite?
+  \item[RQ3] Does GRDI replay audit deterministically verify persisted shadow
+  chains without re-simulation or external connector invocation?
+  \item[RQ4] Does the HAV fail-closed policy produce the intended blocking or
   passing behavior on hand-constructed scenarios covering a contradicted
   critical claim, an unavailable authoritative source, and a supported
   numeric claim?
+  \item[RQ5] Does the current relational anomaly score produce useful rankings
+  on one external network-flow benchmark relative to simple unsupervised
+  baselines?
 \end{description}
 
 It does not test whether PhiGraph prevents all unsafe agent actions, proves
 causality, outperforms specialized state-of-the-art intrusion-detection
-systems, or measures HAV's claim-extraction accuracy against a labeled claim
-corpus.
+systems, measures HAV's claim-extraction accuracy against a labeled claim
+corpus, or establishes Byzantine fault tolerance for scoped storage.
 
 \subsection{Software verification}
 
-The software tree contains 319 automated tests at commit \texttt{a5a7187} on
+To address RQ1, the software tree contains 319 automated tests at commit
+\texttt{a5a7187} on
 \texttt{main}: 262 baseline tests covering protocol records, legacy and scoped
 ledger paths, policy evaluation, runtime modes, persistence backends, API and
 SDK boundaries, agent workflows, graph operations, benchmarks, and deployment
@@ -861,7 +877,7 @@ deployments.
 \subsection{HAV verification scenarios}
 \label{sec:hav-scenarios}
 
-To address RQ3, we exercised the running HAV API with three scenarios chosen
+To address RQ4, we exercised the running HAV API with three scenarios chosen
 to cover the fail-closed policy's distinguishing branches, in addition to the
 11 automated unit and integration tests. In the first, the candidate output
 asserts that all checks passed and the repository is production-ready while
@@ -882,23 +898,23 @@ to generalize beyond the repository-status vocabulary encoded in its rules.
 \subsection{Transactional ledger integrity}
 \label{sec:txn-eval}
 
-To exercise the scoped API introduced in Section~\ref{sec:transactional-ledger},
-the repository includes 57 contract tests (JSON and SQLite) covering idempotent
-append-once under concurrency, undeclared-lock rejection, thread-local JSON
-transaction isolation, compare-and-set on mutable Core collections without
-breaking append-only GRDI chains, commit-failure cleanup, and adversarial
-\texttt{verify\_scoped\_chain} cases (missing heads, orphan heads, sequence
-gaps, column tampering, and coordinated metadata manipulation; see
-Figure~\ref{fig:verify-scoped-chain}). These tests establish \emph{implemented} integrity behavior for the shipped backends; they
-do not prove security against a privileged attacker with signing keys and
-unrestricted storage access.
+To address RQ2, the repository includes 57 contract tests (JSON and SQLite)
+covering idempotent append-once under concurrency, undeclared-lock rejection,
+thread-local JSON transaction isolation, compare-and-set on mutable Core
+collections without breaking append-only GRDI chains, commit-failure cleanup,
+and adversarial \texttt{verify\_scoped\_chain} cases (missing heads, orphan
+heads, sequence gaps, column tampering, and coordinated metadata manipulation;
+see Figure~\ref{fig:verify-scoped-chain}). These tests establish
+\emph{implemented} integrity behavior for the shipped backends; they do not
+prove security against a privileged attacker with signing keys and unrestricted
+storage access.
 
 \subsection{GRDI replay audit scenarios}
 \label{sec:grdi-eval}
 
-GRDI replay and historical-comparison modules are covered by automated tests
-that rebuild manifest hashes from persisted shadow records, reject tampered
-receipt links, and assert explicit non-execution invariants
+To address RQ3, GRDI replay and historical-comparison modules are covered by
+automated tests that rebuild manifest hashes from persisted shadow records,
+reject tampered receipt links, and assert explicit non-execution invariants
 (\texttt{replay\_executed=false}, \texttt{connector\_invoked=false}).
 These tests confirm \emph{implemented} read-only audit behavior on JSON and
 SQLite backends; they do not establish causal correctness of shadow
@@ -906,8 +922,8 @@ simulations or semantic equivalence between production deployments.
 
 \subsection{External anomaly-ranking experiment}
 
-The committed external-validation artifact uses the CIC-IDS2017 Friday
-afternoon DDoS flow file \cite{sharafaldin2018cicids}. It contains 225,745
+To address RQ5, the committed external-validation artifact uses the CIC-IDS2017
+Friday afternoon DDoS flow file \cite{sharafaldin2018cicids}. It contains 225,745
 rows: 97,718 benign and 128,027 DDoS. With random seed 47, the protocol draws a
 12,000-row benign-only reference set and evaluates a balanced test set of
 6,000 benign and 6,000 DDoS flows. Preprocessing and variable-feature selection
