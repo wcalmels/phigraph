@@ -5,7 +5,7 @@
 [![Python](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/)
 [![Release](https://img.shields.io/badge/release-4.1.0--rc.1-orange.svg)](RELEASE_NOTES_V4.1.0.md)
 [![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.21689514.svg)](https://doi.org/10.5281/zenodo.21689514)
-[![Paper](https://img.shields.io/badge/Paper-PDF%20%7C%20DOCX-blue)](paper/main.pdf)
+[![Paper](https://img.shields.io/badge/Paper-PDF%20%7C%20DOCX-blue)](paper/zenodo/PhiGraph_Paper_v2_draft.pdf)
 
 **TUCH PhiGraph Core 4.1.0-rc.5** is a governed relational-intelligence platform for recording, verifying and controlling claims and actions produced by software agents and AI systems.
 
@@ -137,8 +137,8 @@ Zenodo deposit (v1 published; v2 draft on [`docs/paper-v2`](paper/PAPER_V2_OUTLI
 
 | Format | File | DOI |
 |--------|------|-----|
-| PDF (figures) | [`paper/main.pdf`](paper/main.pdf) | [10.5281/zenodo.21689514](https://doi.org/10.5281/zenodo.21689514) |
-| DOCX (text export) | [`paper/main.docx`](paper/main.docx) | same record |
+| PDF (figures) | [`paper/zenodo/PhiGraph_Paper_v2_draft.pdf`](paper/zenodo/PhiGraph_Paper_v2_draft.pdf) | [10.5281/zenodo.21689514](https://doi.org/10.5281/zenodo.21689514) |
+| DOCX (text export) | [`paper/zenodo/PhiGraph_Paper_v2_draft.docx`](paper/zenodo/PhiGraph_Paper_v2_draft.docx) | same record |
 | LaTeX source | [`paper/main.tex`](paper/main.tex) | CC BY 4.0 |
 
 Build locally: see [`paper/README.md`](paper/README.md).

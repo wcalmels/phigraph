@@ -71,6 +71,10 @@ Upload at minimum:
 
 Metadata draft: `zenodo_metadata.json` (v2 update pending).
 
+### Zenodo upload folder
+
+Ready-to-publish copies: [`zenodo/`](zenodo/) (`PhiGraph_Paper_v2_draft.pdf`, `.docx`, source, license).
+
 ---
 
 ## v2 workflow (draft)
