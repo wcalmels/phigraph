@@ -2,7 +2,7 @@
 
 **Date:** 2026-08-09
 **Branch:** `feature/core-transactional-ledger-api-v1`
-**Core:** 4.1.0-rc.6  
+**Core:** 4.1.0-rc.6
 **Protocol:** Transactional Ledger 0.1.0 (implementation candidate)
 
 ## Scope
@@ -59,7 +59,8 @@ CAS/chain separation, commit failure recovery, and tamper detection.
 
 - PostgreSQL scoped backend not implemented
 - GRDI still uses legacy `_lock` / `register_scoped_record*` internally
-- CAS allowed only on Core collections (not GRDI scoped collections)
+- CAS allowed only on mutable Core collections (standalone hashes, not chain-linked)
+- Chain-linked GRDI collections are append-only; CAS rejected on those collections
 - JSON backend has no cross-process safety (by design)
 
 ## References

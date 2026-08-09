@@ -17,8 +17,9 @@ Legacy ledger methods remain available; GRDI service is unchanged in this releas
 - `EvidenceLedger.migrate_legacy_scoped_sqlite()` — explicit legacy → scoped migration
 - SQLite tables `phigraph_scoped_ledger` and `phigraph_chain_heads`
 - JSON companion store (`*.scoped.json`) with staged transactions
+- `EvidenceLedger.verify_scoped_chain()` for scoped store integrity
 - Module `phigraph.core_v3.transactions` (types, errors, canonical payload hash)
-- 19 contract tests under `tests/contract/`
+- 45 contract tests under `tests/contract/`
 
 ## Backend semantics
 
@@ -48,4 +49,4 @@ rows into scoped tables. Migration is idempotent and aborts on hash conflicts.
 
 ## Tests
 
-281 automated tests (262 baseline + 19 contract).
+307 automated tests (262 baseline + 45 contract).
