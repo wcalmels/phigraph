@@ -364,12 +364,12 @@ and independent audit anchors.
 Core~4.1.0-rc.6 adds a \emph{scoped transactional} persistence layer for
 multi-tenant deployments. Business records are keyed by tenant, project,
 collection, and canonical business key, and stored with an explicit payload
-hash, chain metadata, and row version. The public API exposes
+hash, chain metadata, and row version. Public scoped operations include
 \texttt{append\_scoped}, \texttt{append\_scoped\_once}, \texttt{get\_scoped},
 \texttt{list\_scoped}, \texttt{compare\_and\_set\_scoped}, and
-\texttt{run\_scoped\_transaction}. A separate \texttt{verify\_scoped\_chain}
-operation recomputes hashes, chain continuity, and chain-head consistency
-without repairing data.
+\texttt{run\_scoped\_transaction}; integrity verification uses
+\texttt{verify\_scoped\_chain}, which recomputes hashes, chain continuity, and
+chain-head consistency without repairing data.
 
 \paragraph{Write locks.} Every mutating call inside a transaction must declare
 its locks up front. A \emph{chain lock} covers an entire scoped collection and
@@ -383,11 +383,10 @@ to reduce deadlock risk across concurrent workers.
 \paragraph{Atomic transactions.}
 \texttt{run\_scoped\_transaction} accepts a callback that performs multiple
 scoped operations under one commit boundary. On the JSON backend, writes are
-staged in thread-local state and flushed on success;
-\texttt{transactional\_mode=multiprocess} is rejected fail-closed because
-cross-process file locking is not provided. On SQLite, the engine uses
-\texttt{BEGIN IMMEDIATE} with scoped tables \texttt{phigraph\_scoped\_ledger}
-and \texttt{phigraph\_chain\_heads}. A callback failure or commit error rolls
+staged in thread-local state and flushed on success. JSON rejects multiprocess
+transactional mode fail-closed because cross-process file locking is not
+provided. On SQLite, the engine uses \texttt{BEGIN IMMEDIATE} with scoped
+tables \texttt{phigraph\_scoped\_ledger} and \texttt{phigraph\_chain\_heads}. A callback failure or commit error rolls
 back staged state and clears transaction context.
 
 \paragraph{Integrity verification.}
@@ -738,14 +737,14 @@ through the scoped transactional API in Section~\ref{sec:transactional-ledger}
 and never invokes external connectors or live executors in the current release.
 
 \paragraph{State separation.}
-Verification (\texttt{VERIFIED} / \texttt{NOT\_VERIFIED}), authorization
-(\texttt{AUTHORIZED}, \texttt{NOT\_AUTHORIZED}, or
-\texttt{REQUIRES\_APPROVAL}), and execution (\texttt{NOT\_EXECUTED}
-throughout Foundation and shadow increments) are stored as distinct fields.
-A passing HAV receipt does not by itself authorize an action; an authorized
-envelope does not imply that an external action was executed. The shadow
-execution gateway may record \texttt{SIMULATED} plans and signed receipts
-while preserving \texttt{execution\_state=NOT\_EXECUTED}.
+Verification uses \texttt{VERIFIED} or \texttt{NOT\_VERIFIED}; authorization
+uses \texttt{AUTHORIZED}, \texttt{NOT\_AUTHORIZED}, or
+\texttt{REQUIRES\_APPROVAL}; execution remains \texttt{NOT\_EXECUTED}
+throughout Foundation and shadow increments. These states are stored as
+distinct fields. A passing HAV receipt does not by itself authorize an action;
+an authorized envelope does not imply that an external action was executed.
+The shadow execution gateway may record \texttt{SIMULATED} plans and signed
+receipts while preserving \texttt{execution\_state=NOT\_EXECUTED}.
 
 \paragraph{Persisted chain.}
 A typical shadow path appends, in order: a \texttt{DecisionEnvelope} (HAV
