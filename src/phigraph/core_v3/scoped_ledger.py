@@ -120,6 +120,11 @@ def _validate_chain_metadata(row: _ChainRowView) -> None:
         raise LedgerIntegrityError(f"chain_hash_mismatch:{scope}:{row.chain_sequence}")
     if chain.get("linked") is not row.chain_linked:
         raise LedgerIntegrityError(f"chain_linked_mismatch:{scope}:{row.chain_sequence}")
+    if is_chain_linked_collection(row.collection):
+        if row.chain_linked is not True:
+            raise LedgerIntegrityError(f"chain_linked_mismatch:{scope}:{row.chain_sequence}")
+        if chain.get("linked") is not True:
+            raise LedgerIntegrityError(f"chain_linked_mismatch:{scope}:{row.chain_sequence}")
     if row.payload_hash is not None:
         expected_hash = canonical_scoped_payload_hash(row.payload)
         if row.payload_hash != expected_hash:
@@ -127,6 +132,8 @@ def _validate_chain_metadata(row: _ChainRowView) -> None:
 
 
 def _invalid_orphan_head(head: _ChainHeadView) -> bool:
+    if head.last_sequence < 0:
+        return True
     if head.last_sequence > 0:
         return True
     return head.last_sequence == 0 and head.last_chain_hash is not None
@@ -189,7 +196,7 @@ def _validate_standalone_row(row: _ChainRowView) -> None:
         raise LedgerIntegrityError(f"chain_linked_mismatch:{scope}")
     if chain.get("sequence") != row.chain_sequence:
         raise LedgerIntegrityError(f"chain_sequence_mismatch:{scope}:{row.chain_sequence}")
-    if chain.get("previous_hash") != row.chain_prev:
+    if row.chain_prev is not None or chain.get("previous_hash") is not None:
         raise LedgerIntegrityError(f"chain_previous_hash_mismatch:{scope}:{row.chain_sequence}")
     expected_hash = _standalone_row_hash(row.collection, row.payload)
     if row.chain_hash != expected_hash:

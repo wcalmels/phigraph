@@ -19,7 +19,7 @@ Legacy ledger methods remain available; GRDI service is unchanged in this releas
 - JSON companion store (`*.scoped.json`) with staged transactions
 - `EvidenceLedger.verify_scoped_chain()` for scoped store integrity
 - Module `phigraph.core_v3.transactions` (types, errors, canonical payload hash)
-- 54 contract tests under `tests/contract/`
+- 57 contract tests under `tests/contract/`
 
 ## Backend semantics
 
@@ -49,4 +49,4 @@ rows into scoped tables. Migration is idempotent and aborts on hash conflicts.
 
 ## Tests
 
-316 automated tests (262 baseline + 54 contract).
+316 automated tests (262 baseline + 57 contract).

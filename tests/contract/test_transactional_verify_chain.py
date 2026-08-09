@@ -324,6 +324,69 @@ def _tamper_json_chain_linked_flag(ledger, *, tenant_id: str, project_id: str, p
     ledger._scoped_engine._write_json_state(state)
 
 
+def _tamper_json_coordinated_linked_false(ledger, *, tenant_id: str, project_id: str, plan_id: str) -> None:
+    state = ledger._scoped_engine._read_json_state()
+    key = f"{tenant_id}\0{project_id}\0shadow_execution_receipts\0{plan_id}"
+    row = state.records[key]
+    row.chain_linked = False
+    row.payload["_chain"]["linked"] = False
+    ledger._scoped_engine._write_json_state(state)
+
+
+def _append_action(ledger, *, tenant_id: str, project_id: str, action_id: str) -> None:
+    ledger.append_scoped(
+        "actions",
+        {"action_id": action_id, "status": "pending", "subject": "repo"},
+        canonical_key=action_id,
+        tenant_id=tenant_id,
+        project_id=project_id,
+    )
+
+
+def _tamper_standalone_previous_hash(
+    ledger,
+    *,
+    tenant_id: str,
+    project_id: str,
+    action_id: str,
+) -> None:
+    if _uses_json_store(ledger):
+        state = ledger._scoped_engine._read_json_state()
+        key = f"{tenant_id}\0{project_id}\0actions\0{action_id}"
+        row = state.records[key]
+        row.chain_prev = "badprev"
+        row.payload["_chain"]["previous_hash"] = "badprev"
+        ledger._scoped_engine._write_json_state(state)
+        return
+    backend = ledger.backend
+    with backend._lock, backend._connect() as conn:
+        row = conn.execute(
+            """
+            SELECT payload FROM phigraph_scoped_ledger
+            WHERE tenant_id=? AND project_id=? AND collection=? AND canonical_key=?
+            """,
+            (tenant_id, project_id, "actions", action_id),
+        ).fetchone()
+        payload = json.loads(row[0])
+        payload["_chain"]["previous_hash"] = "badprev"
+        conn.execute(
+            """
+            UPDATE phigraph_scoped_ledger
+            SET chain_prev=?, payload=?
+            WHERE tenant_id=? AND project_id=? AND collection=? AND canonical_key=?
+            """,
+            (
+                "badprev",
+                json.dumps(payload, sort_keys=True),
+                tenant_id,
+                project_id,
+                "actions",
+                action_id,
+            ),
+        )
+        conn.commit()
+
+
 def _tamper_payload_hash(
     ledger,
     *,
@@ -471,4 +534,34 @@ def test_verify_scoped_chain_invalid_orphan_head_combinations_fail(
         last_chain_hash=last_chain_hash,
     )
     with pytest.raises(LedgerIntegrityError, match="orphan_chain_head"):
+        ledger.verify_scoped_chain()
+
+
+def test_verify_scoped_chain_json_coordinated_linked_false_fails(json_ledger):
+    ledger = json_ledger()
+    _append_receipt(ledger, tenant_id="tenant-a", project_id="project-a", plan_id="plan_coord_linked")
+    _tamper_json_coordinated_linked_false(
+        ledger,
+        tenant_id="tenant-a",
+        project_id="project-a",
+        plan_id="plan_coord_linked",
+    )
+    with pytest.raises(LedgerIntegrityError, match="chain_linked_mismatch"):
+        ledger.verify_scoped_chain()
+
+
+@pytest.mark.parametrize("factory_name", ("json_ledger", "sqlite_ledger"))
+def test_verify_scoped_chain_standalone_previous_hash_tamper_fails(
+    json_ledger, sqlite_ledger, factory_name, request
+):
+    factory = request.getfixturevalue(factory_name)
+    ledger = factory()
+    _append_action(ledger, tenant_id="tenant-a", project_id="project-a", action_id="act_prev")
+    _tamper_standalone_previous_hash(
+        ledger,
+        tenant_id="tenant-a",
+        project_id="project-a",
+        action_id="act_prev",
+    )
+    with pytest.raises(LedgerIntegrityError, match="chain_previous_hash_mismatch"):
         ledger.verify_scoped_chain()
