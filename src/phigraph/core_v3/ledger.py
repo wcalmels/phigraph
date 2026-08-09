@@ -6,9 +6,9 @@ import json
 from dataclasses import replace
 from pathlib import Path
 from threading import RLock
-from typing import Any
+from typing import Any, Callable
 
-from .backends import JsonLedgerBackend, LedgerBackend
+from .backends import JsonLedgerBackend, LedgerBackend, SQLiteLedgerBackend
 from .models import (
     ActionProposal,
     Claim,
@@ -17,6 +17,20 @@ from .models import (
     Outcome,
     PolicyDecision,
     Verification,
+)
+from .scoped_ledger import (
+    ScopedLedgerEngine,
+    ScopedTransactionSession,
+    migrate_legacy_scoped_sqlite,
+)
+from .transactions import (
+    CompareAndSetResult,
+    LockRef,
+    ScopedRecordResult,
+    TransactionUnavailable,
+    canonical_scoped_payload_hash,
+    normalize_lock_refs,
+    validate_lock_refs_scope,
 )
 
 
@@ -40,8 +54,14 @@ class EvidenceLedger:
         "historical_comparisons",
     )
 
-    def __init__(self, path: str | Path | None = None, *, backend: LedgerBackend | None = None,
-                 signing_key: str | bytes | None = None):
+    def __init__(
+        self,
+        path: str | Path | None = None,
+        *,
+        backend: LedgerBackend | None = None,
+        signing_key: str | bytes | None = None,
+        transactional_mode: str = "single_process",
+    ):
         if backend is None:
             if path is None:
                 raise ValueError("path or backend is required")
@@ -49,11 +69,17 @@ class EvidenceLedger:
         self.backend = backend
         self._lock = RLock()
         self.signing_key = signing_key.encode() if isinstance(signing_key, str) else signing_key
+        self.transactional_mode = transactional_mode
+        self._scoped_engine = ScopedLedgerEngine(backend, transactional_mode=transactional_mode)
 
     @staticmethod
     def hash_payload(payload: Any) -> str:
         encoded = json.dumps(payload, sort_keys=True, separators=(",", ":"), default=str).encode("utf-8")
         return hashlib.sha256(encoded).hexdigest()
+
+    @staticmethod
+    def canonical_scoped_payload_hash(record: dict[str, Any]) -> str:
+        return canonical_scoped_payload_hash(record)
 
     def sign_hash(self, content_hash: str) -> str | None:
         if not self.signing_key:
@@ -324,3 +350,110 @@ class EvidenceLedger:
         payload["summary"] = {key: len(payload[key]) for key in self.COLLECTIONS}
         payload["summary"]["verified_claims"] = sum(item["status"] == ClaimStatus.VERIFIED.value for item in payload["claims"])
         return payload
+
+    def append_scoped(
+        self,
+        collection: str,
+        record: dict[str, Any],
+        *,
+        canonical_key: str,
+        tenant_id: str,
+        project_id: str,
+    ) -> dict[str, Any]:
+        return self._scoped_engine._append_scoped(
+            collection,
+            record,
+            canonical_key=canonical_key,
+            tenant_id=tenant_id,
+            project_id=project_id,
+            once=False,
+        )
+
+    def append_scoped_once(
+        self,
+        collection: str,
+        record: dict[str, Any],
+        *,
+        canonical_key: str,
+        tenant_id: str,
+        project_id: str,
+    ) -> ScopedRecordResult:
+        result = self._scoped_engine._append_scoped(
+            collection,
+            record,
+            canonical_key=canonical_key,
+            tenant_id=tenant_id,
+            project_id=project_id,
+            once=True,
+        )
+        return ScopedRecordResult(record=result["record"], created=result["created"])
+
+    def get_scoped(
+        self,
+        collection: str,
+        *,
+        canonical_key: str,
+        tenant_id: str,
+        project_id: str,
+    ) -> dict[str, Any]:
+        return self._scoped_engine._get_scoped(
+            collection,
+            canonical_key=canonical_key,
+            tenant_id=tenant_id,
+            project_id=project_id,
+        )
+
+    def list_scoped(
+        self,
+        collection: str,
+        *,
+        tenant_id: str,
+        project_id: str,
+        limit: int = 100,
+        offset: int = 0,
+    ) -> list[dict[str, Any]]:
+        return self._scoped_engine._list_scoped(
+            collection,
+            tenant_id=tenant_id,
+            project_id=project_id,
+            limit=limit,
+            offset=offset,
+        )
+
+    def compare_and_set_scoped(
+        self,
+        collection: str,
+        record: dict[str, Any],
+        *,
+        canonical_key: str,
+        tenant_id: str,
+        project_id: str,
+        expected_version: int | None = None,
+        expected_payload_hash: str | None = None,
+    ) -> CompareAndSetResult:
+        return self._scoped_engine._compare_and_set_scoped(
+            collection,
+            record,
+            canonical_key=canonical_key,
+            tenant_id=tenant_id,
+            project_id=project_id,
+            expected_version=expected_version,
+            expected_payload_hash=expected_payload_hash,
+        )
+
+    def run_scoped_transaction(
+        self,
+        tenant_id: str,
+        project_id: str,
+        lock_refs: tuple[LockRef, ...],
+        fn: Callable[[ScopedTransactionSession], Any],
+    ) -> Any:
+        validate_lock_refs_scope(lock_refs, tenant_id=tenant_id, project_id=project_id)
+        normalize_lock_refs(lock_refs)
+        return self._scoped_engine.run_scoped_transaction(tenant_id, project_id, fn)
+
+    def migrate_legacy_scoped_sqlite(self) -> dict[str, Any]:
+        """Explicit SQLite migration from legacy ``ledger`` rows to scoped tables."""
+        if not isinstance(self.backend, SQLiteLedgerBackend):
+            raise TransactionUnavailable("migrate_legacy_scoped_sqlite requires SQLite backend")
+        return migrate_legacy_scoped_sqlite(self)

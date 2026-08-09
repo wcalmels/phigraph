@@ -17,9 +17,26 @@ __all__ = [
     "StaticAgentAdapter", "PhiGraphCoreRuntime", "RuntimeReport", "CoreV3Service",
     "LegacyBridge", "LegacyIntegrationPaths", "LedgerBackend", "JsonLedgerBackend",
     "SQLiteLedgerBackend", "PostgreSQLLedgerBackend", "IdempotencyStore",
+    "LockKind", "LockRef", "ScopedRecordResult", "CompareAndSetResult",
+    "LedgerError", "DuplicateCanonicalKey", "ScopedRecordNotFound",
+    "VersionConflict", "TransactionUnavailable", "LedgerIntegrityError",
+    "canonical_scoped_payload_hash",
 ]
 
 from .backends import PostgreSQLLedgerBackend, LedgerBackend, JsonLedgerBackend, SQLiteLedgerBackend
+from .transactions import (
+    CompareAndSetResult,
+    DuplicateCanonicalKey,
+    LedgerError,
+    LedgerIntegrityError,
+    LockKind,
+    LockRef,
+    ScopedRecordNotFound,
+    ScopedRecordResult,
+    TransactionUnavailable,
+    VersionConflict,
+    canonical_scoped_payload_hash,
+)
 from .idempotency import IdempotencyStore
 
 from .code_benchmark import (

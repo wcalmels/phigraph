@@ -1,6 +1,6 @@
 # Core Transactional Ledger Protocol v1.0 (proposed)
 
-**Status:** draft — design only (revision 3)
+**Status:** implemented (JSON/SQLite) — PostgreSQL pending
 **Branch:** `feature/grdi-foundation-1.0-rc`
 **Companion:** ADR-020
 

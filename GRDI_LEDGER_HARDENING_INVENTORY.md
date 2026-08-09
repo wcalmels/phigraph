@@ -313,6 +313,8 @@ These remain acceptable in tests until contract tests provide sanctioned mutatio
 | Key rotation | Verify with keyring; never re-sign historical records |
 | JSON/SQLite CAS | Serialize; loser gets VersionConflict |
 | Backend concurrency | JSON single-process; SQLite single-node multiprocess; PG multinode |
+| **Core public transactional API** | **IMPLEMENTED** (4.1.0-rc.6): `append_scoped*`, `get/list_scoped`, CAS, `run_scoped_transaction` on JSON/SQLite |
+| **GRDI service migration** | **OPEN** — still uses `_lock` and legacy scoped methods |
 
 ---
 
