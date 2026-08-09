@@ -1,22 +1,22 @@
 # PhiGraph Project Status
 
 **Last updated:** 2026-08-08
-**Branch:** `feature/grdi-outcome-ledger-shadow-v1`
-**Release target:** 4.1.0-rc.4 → 4.1.0 stable
+**Branch:** `feature/grdi-replay-audit-v1`
+**Release target:** 4.1.0-rc.5 → 4.1.0 stable
 
 ## Executive summary
 
-PhiGraph Core **4.1.0-rc.4** adds GRDI Shadow Outcome Ledger v0.3 on top of the
-shadow Execution Gateway. Simulation receipts can now produce immutable, signed
-outcome records that describe declared shadow results without representing real
-execution or external effects.
+PhiGraph Core **4.1.0-rc.5** adds GRDI Replay Audit v0.4 on top of the shadow
+Outcome Ledger. Operators can reconstruct, verify, and compare the persisted
+shadow chain without re-simulation, execution, or external side effects.
 
 ## Current versions
 
 | Artifact | Version |
 |----------|---------|
-| Core | 4.1.0-rc.4 (development candidate) |
-| GRDI | 0.3.0 (Shadow Outcome Ledger) |
+| Core | 4.1.0-rc.5 (development candidate) |
+| GRDI | 0.4.0 (Replay Audit) |
+| Replay Audit protocol | 0.1.0 |
 | Outcome Ledger protocol | 0.1.0 |
 | HAV | 0.2.0 |
 | Protocol | 2.0.0 |
@@ -24,27 +24,35 @@ execution or external effects.
 
 ## Completed (this branch)
 
-- [x] Shadow Outcome models and deterministic aggregation
-- [x] Signed outcomes bound to validated simulation receipts
-- [x] `shadow_outcomes` ledger collection with JSON/SQLite compatibility
-- [x] `/v4/grdi/execution-plans/{plan_id}/outcomes` record/read API
-- [x] RBAC permission `grdi:record_outcome`
-- [x] Adversarial tests for tampering, scope, idempotency, and concurrency
-- [x] ADR-018, outcome protocol, conformance report, release notes
+- [x] Replay engine with manifest reconstruction and fail-closed validation
+- [x] Signed `ReplayReport` and `HistoricalComparison` records
+- [x] `replay_reports` and `historical_comparisons` ledger collections
+- [x] `/v4/grdi/.../replays` and replay comparison API
+- [x] RBAC permissions `grdi:replay` and `grdi:compare`
+- [x] Adversarial tests for tampering, scope, drift, idempotency, and concurrency
+- [x] ADR-019, replay protocol, conformance report, release notes
 
 ## In progress
 
-- [ ] Historical replay and comparison engine (shadow-only)
+- [ ] GRDI Foundation 1.0-RC consolidation
+- [ ] PostgreSQL / multi-node transactional hardening
 - [ ] Real connector phase (separate milestone)
 
 ## Chain
 
 ```text
-Decision Envelope → Authority Decision → Shadow Execution Receipt
-→ Shadow Outcome Record → Replay/Audit
+DecisionEnvelope → AuthorityDecision → ShadowExecutionReceipt
+→ ShadowOutcomeRecord → ReplayReport/HistoricalComparison
 ```
 
-## Verification target
+Replay reconstructs and verifies history. It never re-simulates or executes.
 
-- Baseline **200** tests preserved plus **20** outcome tests (**220** total)
-- Ruff, Bandit, build, wheel, Docker green in CI
+## Test status
+
+- **257** automated tests passing locally
+
+## Known limitations
+
+- Replay/comparison idempotency is in-process; multi-node requires future backend constraints.
+- PostgreSQL not validated against a live instance in local runs.
+- Replay reports structural differences only; no semantic causality inference.

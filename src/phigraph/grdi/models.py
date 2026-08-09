@@ -331,3 +331,125 @@ class ShadowOutcomeRecord:
         clean["outcome_state"] = ShadowOutcomeState(clean["outcome_state"])
         clean["execution_state"] = ExecutionState(clean["execution_state"])
         return cls(**clean)
+
+
+class ReplayState(str, Enum):
+    REPRODUCED = "REPRODUCED"
+    DRIFTED = "DRIFTED"
+    INCOMPLETE = "INCOMPLETE"
+    INVALID = "INVALID"
+
+
+class ComparisonState(str, Enum):
+    EQUIVALENT = "EQUIVALENT"
+    DIFFERENT = "DIFFERENT"
+    NOT_COMPARABLE = "NOT_COMPARABLE"
+    INVALID = "INVALID"
+
+
+@dataclass(frozen=True)
+class ReplayManifest:
+    envelope_id: str
+    authority_decision_id: str
+    plan_id: str
+    gateway_decision_id: str
+    shadow_receipt_id: str
+    outcome_id: str
+    tenant_id: str
+    project_id: str
+    record_hashes: dict[str, str]
+    policy_versions: dict[str, str]
+    protocol_versions: dict[str, str]
+    source_chain_heads: dict[str, str | None]
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+
+@dataclass(frozen=True)
+class ReplayReport:
+    replay_id: str
+    plan_id: str
+    outcome_id: str
+    tenant_id: str
+    project_id: str
+    requested_by: str
+    manifest: ReplayManifest
+    manifest_hash: str
+    replay_state: ReplayState
+    validation_results: tuple[dict[str, Any], ...]
+    drift_reasons: tuple[str, ...]
+    replay_executed: bool = False
+    action_executed: bool = False
+    simulation_rerun: bool = False
+    connector_invoked: bool = False
+    external_side_effects: bool = False
+    execution_state: ExecutionState = ExecutionState.NOT_EXECUTED
+    signed_replay: dict[str, Any] = field(default_factory=dict)
+    created_at: str = field(default_factory=utc_now)
+    version: str = GRDI_VERSION
+
+    @classmethod
+    def create(cls, **kwargs: Any) -> "ReplayReport":
+        return cls(replay_id=new_id("rp"), **kwargs)
+
+    def to_dict(self) -> dict[str, Any]:
+        row = asdict(self)
+        row["manifest"] = self.manifest.to_dict()
+        row["replay_state"] = self.replay_state.value
+        row["validation_results"] = list(self.validation_results)
+        row["drift_reasons"] = list(self.drift_reasons)
+        row["execution_state"] = self.execution_state.value
+        return row
+
+    @classmethod
+    def from_dict(cls, row: dict[str, Any]) -> "ReplayReport":
+        clean = {key: value for key, value in row.items() if key not in {"_chain", "scope"}}
+        clean["manifest"] = ReplayManifest(**clean["manifest"])
+        clean["validation_results"] = tuple(clean.get("validation_results", ()))
+        clean["drift_reasons"] = tuple(clean.get("drift_reasons", ()))
+        clean["replay_state"] = ReplayState(clean["replay_state"])
+        clean["execution_state"] = ExecutionState(clean["execution_state"])
+        return cls(**clean)
+
+
+@dataclass(frozen=True)
+class HistoricalComparison:
+    comparison_id: str
+    baseline_replay_id: str
+    candidate_replay_id: str
+    tenant_id: str
+    project_id: str
+    requested_by: str
+    comparison_state: ComparisonState
+    structural_differences: tuple[dict[str, Any], ...]
+    hash_differences: tuple[dict[str, Any], ...]
+    policy_differences: tuple[dict[str, Any], ...]
+    outcome_differences: tuple[dict[str, Any], ...]
+    comparison_key: str
+    signed_comparison: dict[str, Any] = field(default_factory=dict)
+    created_at: str = field(default_factory=utc_now)
+    version: str = GRDI_VERSION
+
+    @classmethod
+    def create(cls, **kwargs: Any) -> "HistoricalComparison":
+        return cls(comparison_id=new_id("hc"), **kwargs)
+
+    def to_dict(self) -> dict[str, Any]:
+        row = asdict(self)
+        row["comparison_state"] = self.comparison_state.value
+        row["structural_differences"] = list(self.structural_differences)
+        row["hash_differences"] = list(self.hash_differences)
+        row["policy_differences"] = list(self.policy_differences)
+        row["outcome_differences"] = list(self.outcome_differences)
+        return row
+
+    @classmethod
+    def from_dict(cls, row: dict[str, Any]) -> "HistoricalComparison":
+        clean = {key: value for key, value in row.items() if key not in {"_chain", "scope"}}
+        clean["structural_differences"] = tuple(clean.get("structural_differences", ()))
+        clean["hash_differences"] = tuple(clean.get("hash_differences", ()))
+        clean["policy_differences"] = tuple(clean.get("policy_differences", ()))
+        clean["outcome_differences"] = tuple(clean.get("outcome_differences", ()))
+        clean["comparison_state"] = ComparisonState(clean["comparison_state"])
+        return cls(**clean)

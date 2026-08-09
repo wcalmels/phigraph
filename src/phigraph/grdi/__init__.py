@@ -5,6 +5,7 @@ from .models import (
     Approval,
     AuthorityDecision,
     AuthorizationState,
+    ComparisonState,
     DecisionEnvelope,
     EffectAssessment,
     EffectAssessmentState,
@@ -13,6 +14,10 @@ from .models import (
     ExecutionState,
     GatewayDecision,
     GatewayEligibilityState,
+    HistoricalComparison,
+    ReplayManifest,
+    ReplayReport,
+    ReplayState,
     ShadowExecutionReceipt,
     ShadowOutcomeRecord,
     ShadowOutcomeState,
@@ -21,6 +26,7 @@ from .models import (
     action_hash,
 )
 from .outcome_ledger import aggregate_outcome_state, validate_effect_assessments
+from .replay import ReplayEngine, comparison_key, manifest_hash, record_hash
 from .service import GRDIService
 
 __all__ = [
@@ -28,6 +34,7 @@ __all__ = [
     "AuthorizationState",
     "AuthorityDecision",
     "AuthorityEngine",
+    "ComparisonState",
     "DecisionEnvelope",
     "EffectAssessment",
     "EffectAssessmentState",
@@ -38,7 +45,12 @@ __all__ = [
     "GRDIService",
     "GatewayDecision",
     "GatewayEligibilityState",
+    "HistoricalComparison",
     "OUTCOME_ORIGIN_SHADOW_SIMULATION",
+    "ReplayEngine",
+    "ReplayManifest",
+    "ReplayReport",
+    "ReplayState",
     "ShadowExecutionReceipt",
     "ShadowOutcomeRecord",
     "ShadowOutcomeState",
@@ -46,5 +58,8 @@ __all__ = [
     "VerificationState",
     "action_hash",
     "aggregate_outcome_state",
+    "comparison_key",
+    "manifest_hash",
+    "record_hash",
     "validate_effect_assessments",
 ]

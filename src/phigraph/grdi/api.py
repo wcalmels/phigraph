@@ -14,6 +14,7 @@ from phigraph.grdi.service import GRDIService
 from phigraph.version import (
     CORE_VERSION,
     GRDI_OUTCOME_LEDGER_PROTOCOL_VERSION,
+    GRDI_REPLAY_AUDIT_PROTOCOL_VERSION,
     GRDI_VERSION,
     PROTOCOL_VERSION,
 )
@@ -59,6 +60,11 @@ class ShadowOutcomeRequest(BaseModel):
     limitations: list[str] = Field(default_factory=list)
 
 
+class ReplayComparisonRequest(BaseModel):
+    baseline_replay_id: str = Field(min_length=1)
+    candidate_replay_id: str = Field(min_length=1)
+
+
 def create_grdi_router(
     *,
     service: CoreV3Service,
@@ -92,6 +98,8 @@ def create_grdi_router(
             "execution_gateway": "shadow_v0.1",
             "outcome_ledger": "shadow_v0.1",
             "outcome_ledger_protocol": GRDI_OUTCOME_LEDGER_PROTOCOL_VERSION,
+            "replay_audit": "v0.1",
+            "replay_audit_protocol": GRDI_REPLAY_AUDIT_PROTOCOL_VERSION,
         }
 
     @router.post("/envelopes", status_code=201)
@@ -361,6 +369,125 @@ def create_grdi_router(
         try:
             return grdi.get_outcome_for_plan(
                 plan_id,
+                tenant_id=identity.tenant_id,
+                project_id=identity.project_id,
+            )
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+    @router.post("/execution-plans/{plan_id}/replays", status_code=201)
+    def create_replay_report(
+        plan_id: str,
+        idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
+        identity=Depends(auth.require("grdi:replay")),
+    ) -> dict[str, Any]:
+        payload = {
+            "plan_id": plan_id,
+            "tenant_id": identity.tenant_id,
+            "project_id": identity.project_id,
+            "requested_by": identity.subject,
+        }
+
+        def operation() -> dict[str, Any]:
+            try:
+                return grdi.create_replay_report(
+                    plan_id,
+                    tenant_id=identity.tenant_id,
+                    project_id=identity.project_id,
+                    requested_by=identity.subject,
+                )
+            except KeyError as exc:
+                raise HTTPException(status_code=404, detail=str(exc)) from exc
+            except ValueError as exc:
+                raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+        return auth.idempotent(
+            idempotency_key,
+            payload,
+            operation,
+            operation_name="grdi.replay.create",
+            tenant_id=identity.tenant_id,
+            project_id=identity.project_id,
+        )
+
+    @router.get("/replays/{replay_id}")
+    def get_replay_report(replay_id: str, identity=Depends(auth.require("read"))) -> dict[str, Any]:
+        try:
+            return grdi.get_replay_report(
+                replay_id,
+                tenant_id=identity.tenant_id,
+                project_id=identity.project_id,
+            )
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+    @router.get("/execution-plans/{plan_id}/replays")
+    def list_replays_for_plan(plan_id: str, identity=Depends(auth.require("read"))) -> list[dict[str, Any]]:
+        try:
+            self_check = grdi.get_execution_plan(
+                plan_id,
+                tenant_id=identity.tenant_id,
+                project_id=identity.project_id,
+            )
+            _ = self_check["plan_id"]
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        return grdi.list_replays_for_plan(
+            plan_id,
+            tenant_id=identity.tenant_id,
+            project_id=identity.project_id,
+        )
+
+    @router.post("/replay-comparisons", status_code=201)
+    def compare_replays(
+        body: ReplayComparisonRequest,
+        idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
+        identity=Depends(auth.require("grdi:compare")),
+    ) -> dict[str, Any]:
+        payload = {
+            **body.model_dump(mode="json"),
+            "tenant_id": identity.tenant_id,
+            "project_id": identity.project_id,
+            "requested_by": identity.subject,
+        }
+
+        def operation() -> dict[str, Any]:
+            try:
+                return grdi.compare_replays(
+                    body.baseline_replay_id,
+                    body.candidate_replay_id,
+                    tenant_id=identity.tenant_id,
+                    project_id=identity.project_id,
+                    requested_by=identity.subject,
+                )
+            except KeyError as exc:
+                raise HTTPException(status_code=404, detail=str(exc)) from exc
+            except ValueError as exc:
+                raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+        return auth.idempotent(
+            idempotency_key,
+            payload,
+            operation,
+            operation_name="grdi.replay.compare",
+            tenant_id=identity.tenant_id,
+            project_id=identity.project_id,
+        )
+
+    @router.get("/replay-comparisons/{comparison_id}")
+    def get_historical_comparison(
+        comparison_id: str,
+        identity=Depends(auth.require("read")),
+    ) -> dict[str, Any]:
+        try:
+            return grdi.get_historical_comparison(
+                comparison_id,
                 tenant_id=identity.tenant_id,
                 project_id=identity.project_id,
             )

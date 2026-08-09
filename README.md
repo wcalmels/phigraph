@@ -6,19 +6,20 @@
 [![Release](https://img.shields.io/badge/release-4.1.0--rc.1-orange.svg)](RELEASE_NOTES_V4.1.0.md)
 [![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.21689514.svg)](https://doi.org/10.5281/zenodo.21689514)
 
-**TUCH PhiGraph Core 4.1.0-rc.4** is a governed relational-intelligence platform for recording, verifying and controlling claims and actions produced by software agents and AI systems.
+**TUCH PhiGraph Core 4.1.0-rc.5** is a governed relational-intelligence platform for recording, verifying and controlling claims and actions produced by software agents and AI systems.
 
 > Model output is not verified truth. PhiGraph treats it as a candidate claim or action proposal until evidence, policy and verification establish otherwise.
 
 ## Status
 
-PhiGraph **4.1.0-rc.4** (`development candidate`) extends GRDI with a shadow Outcome Ledger: validated simulation receipts produce immutable, signed outcome records that never represent real execution or external effects.
+PhiGraph **4.1.0-rc.5** (`development candidate`) extends GRDI with deterministic replay and historical comparison over the persisted shadow chain — without re-simulation or execution.
 
-- Core version: `4.1.0-rc.4`
-- GRDI version: `0.1.0`
+- Core version: `4.1.0-rc.5`
+- GRDI version: `0.4.0`
+- Replay Audit protocol: `0.1.0`
 - HAV version: `0.2.0`
 - Protocol version: `2.0.0`
-- Automated tests: `146` (integration branch, this session)
+- Automated tests: `257` (integration branch, replay audit increment)
 - Python: `3.10+`
 - Public namespaces: `phigraph.protocol`, `phigraph.core`, `phigraph.hav`, `phigraph.code`, `phigraph.sdk`
 

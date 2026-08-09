@@ -4,7 +4,7 @@ from pathlib import Path
 
 def test_final_public_versions():
     from phigraph.protocol import CORE_VERSION, PROTOCOL_VERSION
-    assert CORE_VERSION == "4.1.0-rc.4"
+    assert CORE_VERSION == "4.1.0-rc.5"
     assert PROTOCOL_VERSION == "2.0.0"
 
 
