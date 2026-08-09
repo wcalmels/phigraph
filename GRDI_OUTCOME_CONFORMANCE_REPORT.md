@@ -12,8 +12,8 @@ by validated `ShadowExecutionReceipt` records.
 | Simulation prerequisite | VALIDATED | Unsimulated plans rejected with `plan_not_simulated` |
 | Receipt integrity gate | VALIDATED | Invalid or manipulated receipts block outcome recording |
 | Deterministic aggregation | VALIDATED | CONSISTENT / DEVIATED / NOT_EVALUATED rules enforced |
-| Signed outcome binding | VALIDATED | Core receipt signer verifies `signed_outcome` |
-| Source receipt hash binding | VALIDATED | Post-outcome receipt mutation fails closed on read |
+| Signed outcome binding | VALIDATED | Full signed payload including identity, metrics, limitations, timestamp and version |
+| Source receipt hash binding | VALIDATED | Canonical full `ShadowExecutionReceipt` hash including signature and metadata |
 | Request/receipt/outcome linkage | VALIDATED | Plan, receipt, scope and assessment tampering rejected |
 | Scoped authentication | VALIDATED | Cross-tenant/project access hidden or blocked |
 | Idempotency | VALIDATED | Repeated record requests return the same outcome |
@@ -24,7 +24,7 @@ by validated `ShadowExecutionReceipt` records.
 
 ## Verification
 
-- Baseline suite preserved: **220** tests passed (200 baseline + 20 outcome tests)
+- Baseline suite preserved: **228** tests passed (200 baseline + 28 outcome tests)
 - focal Ruff, Bandit, build, wheel and Docker checks expected green in CI
 
 ## Explicit limitations

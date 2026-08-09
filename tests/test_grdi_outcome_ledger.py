@@ -67,13 +67,18 @@ def _mutate_ledger_row(core, collection, unique_key, record_id, changes, *, tena
     row = next(item for item in rows if item[unique_key] == record_id)
     clean = {key: value for key, value in row.items() if key not in {"_chain", "scope"}}
     clean.update(changes)
-    core.ledger.update_scoped_record(
-        collection,
-        clean,
-        unique_key=unique_key,
-        tenant_id=tenant_id,
-        project_id=project_id,
-    )
+    with core.ledger._lock:
+        payload = core.ledger._read()
+        for index, existing in enumerate(payload[collection]):
+            if existing[unique_key] != record_id:
+                continue
+            scope = existing.get("scope", {})
+            if scope.get("tenant_id") != tenant_id or scope.get("project_id") != project_id:
+                raise KeyError(f"scoped_record_not_found:{record_id}")
+            payload[collection][index] = {**clean, "scope": scope}
+            core.ledger._write(core.ledger._rechain_payload(payload))
+            return
+    raise KeyError(f"scoped_record_not_found:{record_id}")
 
 
 def test_consistent_outcome_with_full_coverage(tmp_path):
@@ -375,7 +380,7 @@ def test_source_receipt_mutation_after_outcome_fails_closed(tmp_path):
         grdi.get_shadow_outcome(recorded["outcome_id"], tenant_id="tenant-a", project_id="project-a")
 
 
-def test_empty_expected_effects_produce_not_evaluated(tmp_path):
+def test_empty_expected_effects_with_empty_assessments_produce_not_evaluated(tmp_path):
     _, grdi, envelope, decision = _authorized_setup(tmp_path)
     plan = grdi.create_execution_plan(
         **_plan_body(envelope, decision, expected_effects=()),
@@ -389,9 +394,60 @@ def test_empty_expected_effects_produce_not_evaluated(tmp_path):
         tenant_id="tenant-a",
         project_id="project-a",
         recorded_by="human-verifier",
-        effect_assessments=(_matched_assessment("anything"),),
+        effect_assessments=(),
     )
     assert outcome["outcome_state"] == ShadowOutcomeState.NOT_EVALUATED.value
+    assert outcome["effect_assessments"] == []
+
+
+def test_empty_assessments_with_expected_effects_produce_not_evaluated(tmp_path):
+    _, grdi, _, _, plan = _simulated_plan(tmp_path)
+    outcome = grdi.record_shadow_outcome(
+        plan["plan_id"],
+        tenant_id="tenant-a",
+        project_id="project-a",
+        recorded_by="human-verifier",
+        effect_assessments=(),
+    )
+    assert outcome["outcome_state"] == ShadowOutcomeState.NOT_EVALUATED.value
+
+
+@pytest.mark.parametrize(
+    ("field", "mutated", "error"),
+    [
+        ("outcome_id", "so_tampered_outcome_id", "shadow_outcome_outcome_id_mismatch"),
+        ("recorded_by", "attacker", "shadow_outcome_recorded_by_mismatch"),
+        ("metrics", {"injected": True}, "shadow_outcome_metrics_mismatch"),
+        ("limitations", ["tampered"], "shadow_outcome_limitations_mismatch"),
+        ("recorded_at", "2099-01-01T00:00:00+00:00", "shadow_outcome_recorded_at_mismatch"),
+        ("version", "9.9.9", "shadow_outcome_version_mismatch"),
+    ],
+)
+def test_signed_outcome_exterior_fields_reject_tampering(tmp_path, field, mutated, error):
+    core, grdi, _, _, plan = _simulated_plan(tmp_path)
+    recorded = grdi.record_shadow_outcome(
+        plan["plan_id"],
+        tenant_id="tenant-a",
+        project_id="project-a",
+        recorded_by="human-verifier",
+        effect_assessments=(_matched_assessment("staging promotion recorded"),),
+        metrics={"latency_ms": 0},
+        limitations=("shadow only",),
+    )
+    _mutate_ledger_row(
+        core,
+        "shadow_outcomes",
+        "outcome_id",
+        recorded["outcome_id"],
+        {field: mutated},
+        tenant_id="tenant-a",
+        project_id="project-a",
+    )
+    with pytest.raises(ValueError, match=error):
+        if field == "outcome_id":
+            grdi.get_outcome_for_plan(plan["plan_id"], tenant_id="tenant-a", project_id="project-a")
+        else:
+            grdi.get_shadow_outcome(recorded["outcome_id"], tenant_id="tenant-a", project_id="project-a")
 
 
 def test_zero_execution_connectors_and_external_effects(tmp_path):

@@ -25,6 +25,7 @@ from phigraph.grdi.models import (
     action_hash,
 )
 from phigraph.grdi.outcome_ledger import aggregate_outcome_state, validate_effect_assessments
+from phigraph.version import GRDI_VERSION
 
 
 class GRDIService:
@@ -315,6 +316,8 @@ class GRDIService:
                 "connector_invoked": False,
                 "execution_state": ExecutionState.NOT_EXECUTED.value,
                 "source_receipt_hash": source_receipt_hash,
+                "recorded_at": draft.recorded_at,
+                "version": GRDI_VERSION,
             }
             signed_outcome = self.core.receipt_signer.sign(outcome_body)
             record = ShadowOutcomeRecord(
@@ -361,8 +364,12 @@ class GRDIService:
 
     @staticmethod
     def _source_receipt_hash(receipt: ShadowExecutionReceipt) -> str:
-        canonical = {key: value for key, value in receipt.normalized_plan.items() if key != "signature"}
-        return EvidenceLedger.hash_payload(canonical)
+        return EvidenceLedger.hash_payload(receipt.to_dict())
+
+    @staticmethod
+    def _require_signed_outcome_match(record_value: Any, signed_value: Any, error: str) -> None:
+        if record_value != signed_value:
+            raise ValueError(error)
 
     def _validate_shadow_outcome(
         self,
@@ -381,6 +388,37 @@ class GRDIService:
             raise ValueError("shadow_outcome_source_receipt_hash_mismatch")
         if signed.get("source_receipt_hash") != expected_hash:
             raise ValueError("shadow_outcome_signed_source_receipt_hash_mismatch")
+
+        self._require_signed_outcome_match(
+            record.outcome_id,
+            signed.get("outcome_id"),
+            "shadow_outcome_outcome_id_mismatch",
+        )
+        self._require_signed_outcome_match(
+            record.recorded_by,
+            signed.get("recorded_by"),
+            "shadow_outcome_recorded_by_mismatch",
+        )
+        self._require_signed_outcome_match(
+            record.metrics,
+            signed.get("metrics", {}),
+            "shadow_outcome_metrics_mismatch",
+        )
+        self._require_signed_outcome_match(
+            list(record.limitations),
+            signed.get("limitations", []),
+            "shadow_outcome_limitations_mismatch",
+        )
+        self._require_signed_outcome_match(
+            record.recorded_at,
+            signed.get("recorded_at"),
+            "shadow_outcome_recorded_at_mismatch",
+        )
+        self._require_signed_outcome_match(
+            record.version,
+            signed.get("version"),
+            "shadow_outcome_version_mismatch",
+        )
 
         if record.plan_id != request.plan_id or signed.get("plan_id") != request.plan_id:
             raise ValueError("shadow_outcome_plan_mismatch")

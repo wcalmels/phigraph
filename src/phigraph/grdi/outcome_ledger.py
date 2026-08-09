@@ -6,8 +6,6 @@ OUTCOME_ORIGIN_SHADOW = "SHADOW_SIMULATION"
 
 
 def validate_effect_assessments(assessments: tuple[EffectAssessment, ...]) -> None:
-    if not assessments:
-        raise ValueError("effect_assessments_required")
     seen: set[str] = set()
     for assessment in assessments:
         effect = assessment.expected_effect.strip()

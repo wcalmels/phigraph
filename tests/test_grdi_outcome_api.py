@@ -186,6 +186,50 @@ def test_api_spoofed_scope_headers_are_ignored(tmp_path):
     assert hidden.status_code == 404
 
 
+def test_api_empty_assessments_allowed_for_plan_without_expected_effects(tmp_path):
+    client, core = _client(tmp_path)
+    created = client.post(
+        "/v4/grdi/envelopes",
+        json={
+            "domain": "software",
+            "decision_type": "promote_release",
+            "subject": "phigraph@candidate",
+            "proposed_action": {"type": "promote", "target": "staging"},
+            "hav_receipt": _signed_hav_receipt(core),
+            "required_authority": "verifier",
+            "risk_level": "medium",
+        },
+        headers=_headers("release-agent", "operator"),
+    ).json()
+    authorized = client.post(
+        f"/v4/grdi/envelopes/{created['envelope_id']}/authorize",
+        json={},
+        headers=_headers("human-verifier", "verifier"),
+    ).json()
+    plan = client.post(
+        "/v4/grdi/execution-plans",
+        json={
+            "envelope_id": created["envelope_id"],
+            "authority_decision_id": authorized["authority_decision_id"],
+            "requested_action": created["proposed_action"],
+            "expected_effects": [],
+            "rollback_strategy": {"type": "revert_release"},
+        },
+        headers=_headers("release-agent", "operator"),
+    ).json()
+    client.post(
+        f"/v4/grdi/execution-plans/{plan['plan_id']}/simulate",
+        headers=_headers("human-verifier", "verifier"),
+    )
+    recorded = client.post(
+        f"/v4/grdi/execution-plans/{plan['plan_id']}/outcomes",
+        json={"effect_assessments": []},
+        headers=_headers("human-verifier", "verifier"),
+    )
+    assert recorded.status_code == 201
+    assert recorded.json()["outcome_state"] == "NOT_EVALUATED"
+
+
 def test_api_health_reports_outcome_ledger(tmp_path):
     client, _ = _client(tmp_path)
     health = client.get("/v4/grdi/health", headers=_headers("viewer", "viewer"))

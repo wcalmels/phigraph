@@ -54,7 +54,7 @@ class EffectAssessmentRequest(BaseModel):
 
 
 class ShadowOutcomeRequest(BaseModel):
-    effect_assessments: list[EffectAssessmentRequest] = Field(min_length=1)
+    effect_assessments: list[EffectAssessmentRequest] = Field(default_factory=list)
     metrics: dict[str, Any] = Field(default_factory=dict)
     limitations: list[str] = Field(default_factory=list)
 
@@ -327,7 +327,6 @@ def create_grdi_router(
             except ValueError as exc:
                 detail = str(exc)
                 if detail in {
-                    "effect_assessments_required",
                     "expected_effect_required",
                     "simulated_observation_required",
                     "duplicate_expected_effect",
