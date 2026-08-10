@@ -1,8 +1,8 @@
 # Core Transactional Ledger Protocol v2.0
 
-**Status:** implemented (JSON / SQLite / PostgreSQL)  
-**Core:** 4.1.0-rc.7  
-**Protocol version:** 0.2.0  
+**Status:** implemented (JSON / SQLite / PostgreSQL)
+**Core:** 4.1.0-rc.7
+**Protocol version:** 0.2.0
 **Companion:** ADR-020 (contract), ADR-021 (PostgreSQL)
 
 ## Changes from v1.0 (protocol 0.1.0)
@@ -20,6 +20,9 @@ Public Python API signatures are unchanged from ADR-020.
 ## PostgreSQL operations
 
 ### Migration (explicit)
+
+Packaged SQL lives at `src/phigraph/core_v3/sql/postgresql/001_scoped_ledger_v1.sql`
+(wheel-safe via `importlib.resources`).
 
 ```python
 from phigraph.core_v3.postgres_migrations import apply_postgres_migrations

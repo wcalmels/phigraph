@@ -72,13 +72,16 @@ jobs:
           cache: pip
       - name: Install
         run: |
-          python -m pip install --upgrade pip
+          python -m pip install --upgrade pip build
           pip install -e ".[api,benchmark,dev,auth,app,postgres]"
       - name: PostgreSQL contract tests
         run: |
           pytest tests/contract/test_postgres_advisory.py \
             tests/contract/test_transactional_postgres.py \
-            tests/contract/test_transactional_postgres_migration.py -v
+            tests/contract/test_transactional_postgres_migration.py \
+            tests/contract/test_transactional_postgres_schema.py \
+            tests/contract/test_transactional_postgres_extended.py \
+            tests/contract/test_postgres_wheel_migration.py -v
 
   package:
     runs-on: ubuntu-latest

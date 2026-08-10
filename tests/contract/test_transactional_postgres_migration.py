@@ -105,7 +105,7 @@ def legacy_postgres_ledger(postgres_dsn, postgres_ledger):
     with psycopg.connect(postgres_dsn) as conn:
         ensure_legacy_core_ledger_table(conn)
         conn.commit()
-    return postgres_ledger()
+    return postgres_ledger
 
 
 def _insert_legacy_rows(conn, rows: list[tuple[str, str, dict]]) -> None:

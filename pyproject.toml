@@ -54,6 +54,9 @@ phigraph-cyber-mvp = "phigraph.cyber_mvp.launcher:main"
 [tool.setuptools.packages.find]
 where = ["src"]
 
+[tool.setuptools.package-data]
+"phigraph.core_v3" = ["sql/postgresql/*.sql"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-q"

@@ -62,8 +62,89 @@ class PostgresScopedEngine:
         if tls.postgres_conn is not None:
             return tls.postgres_conn, False
         conn = self._backend._connect()
-        conn.execute("BEGIN")
         return conn, True
+
+    def _existing_canonical_result(
+        self,
+        conn: Any,
+        *,
+        tenant_id: str,
+        project_id: str,
+        collection: str,
+        canonical_key: str,
+        incoming_hash: str,
+        once: bool,
+    ) -> dict[str, Any]:
+        row = conn.execute(
+            """
+            SELECT payload_hash, payload FROM phigraph_scoped_ledger
+            WHERE tenant_id = %s AND project_id = %s AND collection = %s AND canonical_key = %s
+            """,
+            (tenant_id, project_id, collection, canonical_key),
+        ).fetchone()
+        if row is None:
+            raise DuplicateCanonicalKey(
+                f"Concurrent insert conflict for {collection}/{canonical_key}"
+            )
+        if row[0] == incoming_hash:
+            payload = row[1] if isinstance(row[1], dict) else json.loads(row[1])
+            return {"record": payload, "created": False} if once else payload
+        raise DuplicateCanonicalKey(
+            f"Duplicate canonical key {canonical_key} in {collection} with different payload"
+        )
+
+    def _resolve_non_canonical_unique_violation(
+        self,
+        conn: Any,
+        *,
+        tenant_id: str,
+        project_id: str,
+        collection: str,
+        canonical_key: str,
+        record_id: str,
+        chain_sequence: int,
+        incoming_hash: str,
+        once: bool,
+        exc: Exception,
+    ) -> dict[str, Any]:
+        by_record = conn.execute(
+            """
+            SELECT canonical_key, payload_hash, payload FROM phigraph_scoped_ledger
+            WHERE tenant_id = %s AND project_id = %s AND collection = %s AND record_id = %s
+            """,
+            (tenant_id, project_id, collection, record_id),
+        ).fetchone()
+        if by_record is not None and by_record[0] != canonical_key:
+            raise DuplicateCanonicalKey(
+                f"record_id {record_id} already used by canonical key {by_record[0]}"
+            ) from exc
+        by_sequence = conn.execute(
+            """
+            SELECT canonical_key, payload_hash, payload FROM phigraph_scoped_ledger
+            WHERE tenant_id = %s AND project_id = %s AND collection = %s AND chain_sequence = %s
+            """,
+            (tenant_id, project_id, collection, chain_sequence),
+        ).fetchone()
+        if by_sequence is not None:
+            if by_sequence[0] == canonical_key and by_sequence[1] == incoming_hash:
+                payload = (
+                    by_sequence[2]
+                    if isinstance(by_sequence[2], dict)
+                    else json.loads(by_sequence[2])
+                )
+                return {"record": payload, "created": False} if once else payload
+            raise DuplicateCanonicalKey(
+                f"chain_sequence {chain_sequence} already assigned in {collection}"
+            ) from exc
+        return self._existing_canonical_result(
+            conn,
+            tenant_id=tenant_id,
+            project_id=project_id,
+            collection=collection,
+            canonical_key=canonical_key,
+            incoming_hash=incoming_hash,
+            once=once,
+        )
 
     def _acquire_write_locks(
         self,
@@ -210,14 +291,18 @@ class PostgresScopedEngine:
             chain_sequence=next_sequence,
             chain_linked=chain_linked,
         )
+        conn.execute("SAVEPOINT scoped_append")
         try:
-            conn.execute(
+            inserted = conn.execute(
                 """
                 INSERT INTO phigraph_scoped_ledger (
                     tenant_id, project_id, collection, canonical_key, record_id,
                     payload, payload_hash, chain_prev, chain_hash, chain_sequence,
                     row_version, created_at, updated_at
                 ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                ON CONFLICT (tenant_id, project_id, collection, canonical_key)
+                DO NOTHING
+                RETURNING payload, payload_hash
                 """,
                 (
                     stored.tenant_id,
@@ -234,25 +319,33 @@ class PostgresScopedEngine:
                     stored.created_at,
                     stored.updated_at,
                 ),
-            )
-        except UniqueViolation as exc:
-            row = conn.execute(
-                """
-                SELECT payload_hash, payload FROM phigraph_scoped_ledger
-                WHERE tenant_id = %s AND project_id = %s AND collection = %s AND canonical_key = %s
-                """,
-                (tenant_id, project_id, collection, canonical_key),
             ).fetchone()
-            if row is None:
-                raise DuplicateCanonicalKey(
-                    f"Concurrent insert conflict for {collection}/{canonical_key}"
-                ) from exc
-            if row[0] == incoming_hash:
-                payload = row[1] if isinstance(row[1], dict) else json.loads(row[1])
-                return {"record": payload, "created": False} if once else payload
-            raise DuplicateCanonicalKey(
-                f"Duplicate canonical key {canonical_key} in {collection} with different payload"
-            ) from exc
+        except UniqueViolation as exc:
+            conn.execute("ROLLBACK TO SAVEPOINT scoped_append")
+            return self._resolve_non_canonical_unique_violation(
+                conn,
+                tenant_id=tenant_id,
+                project_id=project_id,
+                collection=collection,
+                canonical_key=canonical_key,
+                record_id=stored.record_id,
+                chain_sequence=next_sequence,
+                incoming_hash=incoming_hash,
+                once=once,
+                exc=exc,
+            )
+        if inserted is None:
+            conn.execute("ROLLBACK TO SAVEPOINT scoped_append")
+            return self._existing_canonical_result(
+                conn,
+                tenant_id=tenant_id,
+                project_id=project_id,
+                collection=collection,
+                canonical_key=canonical_key,
+                incoming_hash=incoming_hash,
+                once=once,
+            )
+        conn.execute("RELEASE SAVEPOINT scoped_append")
         if chain_linked:
             conn.execute(
                 """
@@ -447,7 +540,6 @@ class PostgresScopedEngine:
             raise TransactionUnavailable("nested scoped transactions are not supported")
         ordered = normalize_lock_refs(lock_refs)
         conn = self._backend._connect()
-        conn.execute("BEGIN")
         tls.postgres_conn = conn
         tls.tx_depth += 1
         tls.lock_context = build_lock_context(ordered)
@@ -630,7 +722,6 @@ def migrate_legacy_scoped_postgres(ledger: Any, *, conn: Any | None = None) -> d
     if own_conn:
         conn = backend._connect()
     try:
-        conn.execute("BEGIN")
         for coll in SCOPED_COLLECTIONS:
             rows = conn.execute(
                 """

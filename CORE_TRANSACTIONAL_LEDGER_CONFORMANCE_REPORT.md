@@ -35,14 +35,15 @@ Modules: `transactions.py`, `scoped_ledger.py`, `postgres_*.py`.
 | JSON | `transactional_mode=multiprocess` | `TransactionUnavailable` |
 | SQLite | multiprocess (8 workers) | one row per canonical key; linear chain |
 | SQLite | CAS (2 workers) | one winner; one `VersionConflict` |
-| PostgreSQL | multiprocess (8 workers) | one row per canonical key; linear chain (CI) |
-| PostgreSQL | CAS (2 workers) | one winner; one `VersionConflict` (CI) |
+| PostgreSQL | multiprocess (8 workers) | **pending CI** (`postgres / Python 3.12`) |
+| PostgreSQL | CAS (2 workers) | **pending CI** |
 
 ## PostgreSQL schema strategy
 
-- Forward migration: `migrations/postgresql/001_scoped_ledger_v1.sql`
+- Packaged migration: `src/phigraph/core_v3/sql/postgresql/001_scoped_ledger_v1.sql`
+- Repository mirror: `migrations/postgresql/` (must match packaged bytes)
 - Tests/CI: `apply_postgres_migrations(conn)` then commit
-- Application: `verify_postgres_schema(conn)` only — missing schema → `TransactionUnavailable`
+- Application: `verify_postgres_schema(conn)` — catalog + checksum verification
 - Legacy cutover: `migrate_legacy_scoped_postgres()` reads `phigraph_core_ledger` only
 
 ## Advisory locks
@@ -52,15 +53,15 @@ deterministic vectors in `tests/contract/test_postgres_advisory.py`.
 
 ## Contract tests
 
-PostgreSQL tests under `tests/contract/test_transactional_postgres*.py` and advisory/schema
-tests. SQLite/JSON contract suite unchanged.
+PostgreSQL tests under `tests/contract/test_transactional_postgres*.py`, schema verification,
+wheel migration smoke test, and advisory vectors. SQLite/JSON contract suite unchanged.
 
 ## Known limitations
 
 - GRDI still uses legacy `_lock` / `register_scoped_record*` internally
 - CAS allowed only on mutable Core collections (not chain-linked GRDI collections)
 - SQLite→PostgreSQL cross-backend import not implemented in this PR
-- Multinode validation requires real PostgreSQL (CI service job)
+- Multinode production validation remains out of scope
 
 ## References
 

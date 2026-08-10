@@ -6,53 +6,14 @@ import pytest
 
 from phigraph.core_v3.backends import PostgreSQLLedgerBackend
 from phigraph.core_v3.ledger import EvidenceLedger
-from phigraph.core_v3.postgres_migrations import (
-    SCOPED_LEDGER_MIGRATION_VERSION,
-    apply_postgres_migrations,
-    verify_postgres_schema,
-)
 from phigraph.core_v3.transactions import (
     DuplicateCanonicalKey,
     LockKind,
     LockRef,
-    TransactionUnavailable,
     VersionConflict,
 )
 
 pytest.importorskip("psycopg")
-
-
-def test_postgres_schema_verify_and_apply(postgres_dsn):
-    import psycopg
-
-    with psycopg.connect(postgres_dsn) as conn:
-        conn.execute("DROP TABLE IF EXISTS phigraph_scoped_ledger CASCADE")
-        conn.execute("DROP TABLE IF EXISTS phigraph_chain_heads CASCADE")
-        conn.execute("DROP TABLE IF EXISTS phigraph_schema_migrations CASCADE")
-        conn.commit()
-        with pytest.raises(TransactionUnavailable):
-            verify_postgres_schema(conn)
-        applied = apply_postgres_migrations(conn)
-        conn.commit()
-        assert applied == [SCOPED_LEDGER_MIGRATION_VERSION]
-        verify_postgres_schema(conn)
-        assert apply_postgres_migrations(conn) == []
-
-
-def test_postgres_engine_rejects_unmigrated_schema(postgres_dsn):
-    import psycopg
-
-    with psycopg.connect(postgres_dsn) as conn:
-        conn.execute("DROP TABLE IF EXISTS phigraph_scoped_ledger CASCADE")
-        conn.execute("DROP TABLE IF EXISTS phigraph_chain_heads CASCADE")
-        conn.execute("DROP TABLE IF EXISTS phigraph_schema_migrations CASCADE")
-        conn.commit()
-    with pytest.raises(TransactionUnavailable):
-        backend = PostgreSQLLedgerBackend(postgres_dsn, EvidenceLedger.COLLECTIONS)
-        EvidenceLedger(backend=backend)
-    with psycopg.connect(postgres_dsn) as conn:
-        apply_postgres_migrations(conn)
-        conn.commit()
 
 
 def test_postgres_scoped_ddl(postgres_ledger, postgres_dsn):
