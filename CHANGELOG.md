@@ -1,5 +1,13 @@
 # Changelog
 
+## 4.1.0-rc.7 - 2026-08-10 (development candidate)
+
+- Implemented PostgreSQL scoped transactional ledger (ADR-021) with explicit migrations.
+- Added `postgres_advisory`, `postgres_migrations`, `postgres_scoped` modules.
+- Added `apply_postgres_migrations()` / `verify_postgres_schema()`; no silent DDL on startup.
+- Added `EvidenceLedger.migrate_legacy_scoped_postgres()` from `phigraph_core_ledger`.
+- Transactional ledger protocol 0.2.0; PostgreSQL contract and multiprocess tests in CI.
+
 ## 4.1.0-rc.6 - 2026-08-09 (development candidate)
 
 - Implemented ADR-020 public transactional ledger API on JSON and SQLite backends.

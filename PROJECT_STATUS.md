@@ -1,22 +1,23 @@
 # PhiGraph Project Status
 
-**Last updated:** 2026-08-09
-**Branch:** `feature/core-transactional-ledger-api-v1`
-**Release target:** 4.1.0-rc.6 → 4.1.0 stable
+**Last updated:** 2026-08-10
+**Branch:** `feature/core-transactional-ledger-postgres-v1`
+**Release target:** 4.1.0-rc.7 → 4.1.0 stable
 
 ## Executive summary
 
-PhiGraph Core **4.1.0-rc.6** implements the ADR-020 public transactional ledger API
-for JSON (single-process) and SQLite (single-node multiprocess). GRDI continues on
+PhiGraph Core **4.1.0-rc.7** adds PostgreSQL scoped transactional ledger support
+(ADR-021) with explicit migrations, advisory locks, and legacy `phigraph_core_ledger`
+cutover. JSON and SQLite paths from 4.1.0-rc.6 are unchanged. GRDI continues on
 legacy scoped methods until a follow-up refactor PR.
 
 ## Current versions
 
 | Artifact | Version |
 |----------|---------|
-| Core | 4.1.0-rc.6 (development candidate) |
+| Core | 4.1.0-rc.7 (development candidate) |
 | GRDI | 0.4.0 (Replay Audit) |
-| Transactional Ledger protocol | 0.1.0 (implementation candidate) |
+| Transactional Ledger protocol | 0.2.0 |
 | Replay Audit protocol | 0.1.0 |
 | Outcome Ledger protocol | 0.1.0 |
 | HAV | 0.2.0 |

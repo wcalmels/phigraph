@@ -1,6 +1,6 @@
 # ADR-020 — Public transactional ledger contract
 
-**Status:** accepted — JSON/SQLite API **IMPLEMENTED** in Core 4.1.0-rc.6 (`feature/core-transactional-ledger-api-v1`); PostgreSQL pending
+**Status:** accepted — JSON/SQLite API **IMPLEMENTED** in Core 4.1.0-rc.6; PostgreSQL **IMPLEMENTED** in Core 4.1.0-rc.7 (ADR-021)
 **Date:** 2026-08-08
 **Branch:** `feature/grdi-foundation-1.0-rc`
 **Base:** `main@06df1eb`
