@@ -1,0 +1,51 @@
+{
+  "placeholder": true,
+  "operation_id": "example-grdi-rc8-staging-20260810-001",
+  "environment": "staging",
+  "started_at": "2026-08-10T16:00:00+00:00",
+  "completed_at": null,
+  "operator": "platform-oncall",
+  "source_core_version": "4.1.0-rc.7",
+  "target_core_version": "4.1.0-rc.8",
+  "target_grdi_version": "0.5.0",
+  "database_identity_hash": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+  "backup_path": "D:/backups/phigraph_staging_20260810.dump",
+  "backup_created_at": "2026-08-10T15:55:00+00:00",
+  "backup_sha256": "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789",
+  "migration_scope": "GLOBAL",
+  "backfill_scope": "GLOBAL",
+  "verification_scope": "GLOBAL",
+  "scope_requested": {
+    "tenant_id": null,
+    "project_id": null
+  },
+  "assessment_state": null,
+  "migration_versions_before": [],
+  "migration_versions_after": [],
+  "collection_counts_before": [],
+  "collection_counts_after": [],
+  "chain_heads_before": [],
+  "chain_heads_after": [],
+  "backup_verification": {
+    "status": "PENDING",
+    "format": "pg_custom",
+    "pg_restore_list": "NOT_EVALUATED"
+  },
+  "verification_results": {},
+  "smoke_results": {
+    "plan_read": "NOT_EVALUATED",
+    "simulation_idempotent": "NOT_EVALUATED",
+    "connectors_disabled": true
+  },
+  "final_state": "NO_GO",
+  "exit_code": null,
+  "limitations": [
+    "forward-only PostgreSQL migrations (001→002); no SQL downgrade",
+    "rollback is restore-backup-to-new-database only",
+    "no real connectors or external side effects during cutover",
+    "SIMULATION_RECORDED events require verifiable shadow_execution_receipts",
+    "RC7→RC8 cutover v1 is GLOBAL-only for --apply",
+    "tenant/project filters are diagnostic-only on --check-only and --verify",
+    "partial backfill requires a future dedicated command; not supported in v1"
+  ]
+}
