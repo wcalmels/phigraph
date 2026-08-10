@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import os
 import subprocess
 import sys
 import zipfile
@@ -65,4 +66,32 @@ def test_wheel_apply_postgres_migrations(postgres_dsn: str, built_wheel: Path) -
         )
         conn.commit()
         verify_postgres_schema(conn)
+    reset_postgres_scoped_schema(postgres_dsn)
+
+
+def test_wheel_installed_module_loads_migration_sql(
+    postgres_dsn: str,
+    built_wheel: Path,
+    tmp_path: Path,
+) -> None:
+    drop_postgres_scoped_schema(postgres_dsn)
+    venv_dir = tmp_path / "wheel-venv"
+    subprocess.run([sys.executable, "-m", "venv", str(venv_dir)], check=True)
+    scripts = "Scripts" if sys.platform == "win32" else "bin"
+    pip = venv_dir / scripts / "pip"
+    python = venv_dir / scripts / "python"
+    subprocess.run([str(pip), "install", f"{built_wheel}[postgres]"], check=True)
+    env = os.environ.copy()
+    env["PHIGRAPH_POSTGRES_DSN"] = postgres_dsn
+    smoke_script = Path(__file__).with_name("_wheel_migration_smoke.py")
+    result = subprocess.run(
+        [str(python), str(smoke_script), scoped_ledger_migration_checksum()],
+        check=False,
+        capture_output=True,
+        text=True,
+        env=env,
+    )
+    if result.returncode != 0:
+        pytest.fail(result.stderr or result.stdout)
+    assert result.stdout.strip() == "1"
     reset_postgres_scoped_schema(postgres_dsn)

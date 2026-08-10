@@ -1,7 +1,7 @@
 # ADR-021: PostgreSQL scoped transactional ledger (multinode v1)
 
 **Status:** accepted — implemented in Core 4.1.0-rc.7
-**Companion:** `docs/protocol/CORE_TRANSACTIONAL_LEDGER_PROTOCOL_V2.md`  
+**Companion:** `docs/protocol/CORE_TRANSACTIONAL_LEDGER_PROTOCOL_V2.md`
 **Supersedes:** PostgreSQL stub section of ADR-020 implementation notes
 
 ## Context

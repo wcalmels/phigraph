@@ -124,6 +124,31 @@ def test_verify_schema_missing_record_id_unique(postgres_dsn):
     _reset_scoped_schema(postgres_dsn)
 
 
+def test_verify_schema_partial_index_incomplete_columns(postgres_dsn):
+    import psycopg
+
+    collections = (
+        "'decision_envelopes', 'authority_decisions', 'execution_requests', "
+        "'gateway_decisions', 'shadow_execution_receipts', 'shadow_outcomes', "
+        "'replay_reports', 'historical_comparisons'"
+    )
+    with psycopg.connect(postgres_dsn) as conn:
+        apply_postgres_migrations(conn)
+        conn.execute("DROP INDEX IF EXISTS uq_scoped_chain_sequence_linked")
+        conn.execute(
+            f"""
+            CREATE UNIQUE INDEX uq_scoped_chain_sequence_linked
+            ON phigraph_scoped_ledger (chain_sequence)
+            WHERE collection IN ({collections})
+            """
+        )
+        conn.commit()
+    with psycopg.connect(postgres_dsn) as conn:
+        with pytest.raises(TransactionUnavailable, match="invalid columns"):
+            verify_postgres_schema(conn)
+    _reset_scoped_schema(postgres_dsn)
+
+
 def test_verify_schema_bad_partial_index(postgres_dsn):
     import psycopg
 
@@ -140,6 +165,19 @@ def test_verify_schema_bad_partial_index(postgres_dsn):
         conn.commit()
     with psycopg.connect(postgres_dsn) as conn:
         with pytest.raises(TransactionUnavailable, match="uq_scoped_chain_sequence_linked"):
+            verify_postgres_schema(conn)
+    _reset_scoped_schema(postgres_dsn)
+
+
+def test_verify_schema_migrations_table_structure(postgres_dsn):
+    import psycopg
+
+    with psycopg.connect(postgres_dsn) as conn:
+        apply_postgres_migrations(conn)
+        conn.execute("ALTER TABLE phigraph_schema_migrations DROP COLUMN checksum")
+        conn.commit()
+    with psycopg.connect(postgres_dsn) as conn:
+        with pytest.raises(TransactionUnavailable, match="checksum"):
             verify_postgres_schema(conn)
     _reset_scoped_schema(postgres_dsn)
 

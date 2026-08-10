@@ -64,6 +64,23 @@ _EXPECTED_RECORD_ID_UNIQUE = (
     "record_id",
 )
 
+_EXPECTED_SCHEMA_MIGRATIONS_COLUMNS: dict[str, tuple[str, bool]] = {
+    "version": ("text", False),
+    "checksum": ("text", False),
+    "applied_at": ("timestamptz", False),
+}
+
+_EXPECTED_SCHEMA_MIGRATIONS_PRIMARY_KEY = ("version",)
+
+_EXPECTED_PARTIAL_CHAIN_INDEX_COLUMNS = (
+    "tenant_id",
+    "project_id",
+    "collection",
+    "chain_sequence",
+)
+
+_PARTIAL_CHAIN_INDEX_NAME = "uq_scoped_chain_sequence_linked"
+
 _CHAIN_LINKED_COLLECTIONS = (
     "decision_envelopes",
     "authority_decisions",
@@ -158,34 +175,73 @@ def _constraint_columns(conn: Any, table: str, contype: str) -> list[tuple[str, 
     return [tuple(row[0]) for row in rows if row[0] is not None]
 
 
+def _index_key_columns(conn: Any, *, table: str, index_name: str) -> tuple[str, ...]:
+    row = conn.execute(
+        """
+        SELECT array_agg(a.attname ORDER BY keys.ordinality)
+        FROM pg_class rel
+        JOIN pg_namespace nsp ON nsp.oid = rel.relnamespace
+        JOIN pg_index idx ON idx.indrelid = rel.oid
+        JOIN pg_class ic ON ic.oid = idx.indexrelid
+        JOIN LATERAL unnest(idx.indkey) WITH ORDINALITY AS keys(attnum, ordinality)
+            ON keys.attnum > 0
+        JOIN pg_attribute a ON a.attrelid = rel.oid AND a.attnum = keys.attnum
+        WHERE nsp.nspname = 'public'
+          AND rel.relname = %s
+          AND ic.relname = %s
+        """,
+        (table, index_name),
+    ).fetchone()
+    if row is None or row[0] is None:
+        raise TransactionUnavailable(
+            f"PostgreSQL scoped schema missing index: {index_name}"
+        )
+    return tuple(row[0])
+
+
 def _verify_partial_chain_index(conn: Any) -> None:
     row = conn.execute(
         """
-        SELECT indexdef
-        FROM pg_indexes
-        WHERE schemaname = 'public'
-          AND tablename = 'phigraph_scoped_ledger'
-          AND indexname = 'uq_scoped_chain_sequence_linked'
-        """
+        SELECT idx.indisunique, pg_get_expr(idx.indpred, idx.indrelid)
+        FROM pg_class rel
+        JOIN pg_namespace nsp ON nsp.oid = rel.relnamespace
+        JOIN pg_index idx ON idx.indrelid = rel.oid
+        JOIN pg_class ic ON ic.oid = idx.indexrelid
+        WHERE nsp.nspname = 'public'
+          AND rel.relname = 'phigraph_scoped_ledger'
+          AND ic.relname = %s
+        """,
+        (_PARTIAL_CHAIN_INDEX_NAME,),
     ).fetchone()
     if row is None:
         raise TransactionUnavailable(
-            "PostgreSQL scoped schema missing index uq_scoped_chain_sequence_linked"
+            f"PostgreSQL scoped schema missing index {_PARTIAL_CHAIN_INDEX_NAME}"
         )
-    indexdef = row[0].lower()
-    if "unique" not in indexdef:
+    is_unique, predicate = row
+    if not is_unique:
         raise TransactionUnavailable(
-            "PostgreSQL scoped schema index uq_scoped_chain_sequence_linked is not unique"
+            f"PostgreSQL scoped schema index {_PARTIAL_CHAIN_INDEX_NAME} is not unique"
         )
-    if "chain_sequence" not in indexdef or "where" not in indexdef:
+    columns = _index_key_columns(
+        conn,
+        table="phigraph_scoped_ledger",
+        index_name=_PARTIAL_CHAIN_INDEX_NAME,
+    )
+    if columns != _EXPECTED_PARTIAL_CHAIN_INDEX_COLUMNS:
         raise TransactionUnavailable(
-            "PostgreSQL scoped schema index uq_scoped_chain_sequence_linked has invalid definition"
+            "PostgreSQL scoped schema index "
+            f"{_PARTIAL_CHAIN_INDEX_NAME} has invalid columns: {columns}"
         )
+    if predicate is None:
+        raise TransactionUnavailable(
+            f"PostgreSQL scoped schema index {_PARTIAL_CHAIN_INDEX_NAME} missing predicate"
+        )
+    predicate_lower = predicate.lower()
     for collection in _CHAIN_LINKED_COLLECTIONS:
-        if collection not in indexdef:
+        if collection not in predicate_lower:
             raise TransactionUnavailable(
-                "PostgreSQL scoped schema index uq_scoped_chain_sequence_linked "
-                f"missing collection filter for {collection}"
+                "PostgreSQL scoped schema index "
+                f"{_PARTIAL_CHAIN_INDEX_NAME} missing collection filter for {collection}"
             )
 
 
@@ -249,6 +305,17 @@ def verify_postgres_schema(conn: Any) -> None:
     if version_row[0] != expected_checksum:
         raise TransactionUnavailable(
             f"PostgreSQL scoped schema migration checksum mismatch for {SCOPED_LEDGER_MIGRATION_VERSION}"
+        )
+
+    _verify_table_columns(
+        conn,
+        table="phigraph_schema_migrations",
+        expected=_EXPECTED_SCHEMA_MIGRATIONS_COLUMNS,
+    )
+    migration_primary_keys = _constraint_columns(conn, "phigraph_schema_migrations", "p")
+    if _EXPECTED_SCHEMA_MIGRATIONS_PRIMARY_KEY not in migration_primary_keys:
+        raise TransactionUnavailable(
+            "PostgreSQL scoped schema missing primary key on phigraph_schema_migrations.version"
         )
 
     _verify_table_columns(

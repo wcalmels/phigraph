@@ -322,6 +322,7 @@ class PostgresScopedEngine:
             ).fetchone()
         except UniqueViolation as exc:
             conn.execute("ROLLBACK TO SAVEPOINT scoped_append")
+            conn.execute("RELEASE SAVEPOINT scoped_append")
             return self._resolve_non_canonical_unique_violation(
                 conn,
                 tenant_id=tenant_id,
@@ -336,6 +337,7 @@ class PostgresScopedEngine:
             )
         if inserted is None:
             conn.execute("ROLLBACK TO SAVEPOINT scoped_append")
+            conn.execute("RELEASE SAVEPOINT scoped_append")
             return self._existing_canonical_result(
                 conn,
                 tenant_id=tenant_id,
