@@ -3,6 +3,7 @@ from __future__ import annotations
 from concurrent.futures import ThreadPoolExecutor
 
 import pytest
+from grdi_scoped_helpers import assert_scoped_chain_valid, mutate_scoped_row, scoped_rows
 from test_grdi_foundation import _envelope, _receipt
 
 from phigraph.core_v3.service import CoreV3Service
@@ -46,14 +47,12 @@ def _plan_body(envelope, decision, **overrides):
 
 
 def _mutate_ledger_row(core, collection, unique_key, record_id, changes, *, tenant_id, project_id):
-    rows = core.ledger.query(collection, tenant_id=tenant_id, project_id=project_id, limit=100000)
-    row = next(item for item in rows if item[unique_key] == record_id)
-    clean = {key: value for key, value in row.items() if key not in {"_chain", "scope"}}
-    clean.update(changes)
-    core.ledger.update_scoped_record(
+    mutate_scoped_row(
+        core.ledger,
         collection,
-        clean,
-        unique_key=unique_key,
+        unique_key,
+        record_id,
+        changes,
         tenant_id=tenant_id,
         project_id=project_id,
     )
@@ -214,7 +213,7 @@ def test_idempotency_and_concurrent_plan_creation(tmp_path):
 
     plan_ids = {plan["plan_id"] for plan in plans}
     assert len(plan_ids) == 4
-    assert len(core.ledger.query("execution_requests", tenant_id="tenant-a", project_id="project-a")) == 4
+    assert len(scoped_rows(core.ledger, "execution_requests", tenant_id="tenant-a", project_id="project-a")) == 4
 
 
 def test_json_and_sqlite_persistence_and_restart(tmp_path):
@@ -235,7 +234,7 @@ def test_json_and_sqlite_persistence_and_restart(tmp_path):
         requested_by="operator-a",
     )
     grdi.simulate_execution_plan(plan["plan_id"], tenant_id="tenant-a", project_id="project-a")
-    assert core.ledger.verify_chain()["valid"] is True
+    assert_scoped_chain_valid(core.ledger, tenant_id="tenant-a", project_id="project-a")
 
     reopened = CoreV3Service(data_dir=tmp_path, receipt_signing_key="secret")
     stored = GRDIService(reopened).get_execution_plan(plan["plan_id"], tenant_id="tenant-a", project_id="project-a")
@@ -269,7 +268,7 @@ def test_json_and_sqlite_persistence_and_restart(tmp_path):
         project_id="project-a",
     )
     assert sqlite_stored["flow_state"]["simulation"] == ShadowSimulationState.SIMULATED.value
-    assert sqlite_reopened.ledger.verify_chain()["valid"] is True
+    assert_scoped_chain_valid(sqlite_reopened.ledger, tenant_id="tenant-a", project_id="project-a")
 
 
 def test_gateway_never_invokes_connectors_or_external_effects(tmp_path):
@@ -363,7 +362,7 @@ def test_concurrent_simulation_creates_single_receipt(tmp_path):
 
     receipt_ids = {result["shadow_receipt"]["receipt_id"] for result in results}
     assert len(receipt_ids) == 1
-    assert len(core.ledger.query("shadow_execution_receipts", tenant_id="tenant-a", project_id="project-a")) == 1
+    assert len(scoped_rows(core.ledger, "shadow_execution_receipts", tenant_id="tenant-a", project_id="project-a")) == 1
 
 
 def test_tampered_shadow_receipt_fails_closed(tmp_path):
@@ -415,7 +414,7 @@ def test_mutated_execution_request_after_simulation_fails_closed(tmp_path):
         tenant_id="tenant-a",
         project_id="project-a",
     )
-    assert core.ledger.verify_chain()["valid"] is True
+    assert_scoped_chain_valid(core.ledger, tenant_id="tenant-a", project_id="project-a")
 
     with pytest.raises(ValueError, match="shadow_receipt_action_hash_mismatch"):
         grdi.get_execution_plan(plan["plan_id"], tenant_id="tenant-a", project_id="project-a")

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 
+from grdi_scoped_helpers import assert_scoped_chain_valid, scoped_rows
 from phigraph.core_v3.receipts import ReceiptSigner
 from phigraph.core_v3.service import CoreV3Service
 from phigraph.grdi import (
@@ -174,10 +175,10 @@ def test_grdi_records_are_scoped_persistent_and_chain_valid(tmp_path):
         authority_role="verifier",
     )
     assert decision.authorization_state is AuthorizationState.AUTHORIZED
-    assert len(core.ledger.query("decision_envelopes", tenant_id="tenant-a", project_id="project-a")) == 1
-    assert len(core.ledger.query("authority_decisions", tenant_id="tenant-a", project_id="project-a")) == 1
-    assert core.ledger.query("decision_envelopes", tenant_id="tenant-b") == []
-    assert core.ledger.verify_chain()["valid"] is True
+    assert len(scoped_rows(core.ledger, "decision_envelopes", tenant_id="tenant-a", project_id="project-a")) == 1
+    assert len(scoped_rows(core.ledger, "authority_decisions", tenant_id="tenant-a", project_id="project-a")) == 1
+    assert scoped_rows(core.ledger, "decision_envelopes", tenant_id="tenant-b", project_id="project-a") == []
+    assert_scoped_chain_valid(core.ledger, tenant_id="tenant-a", project_id="project-a")
 
 
 def test_existing_json_ledger_gains_grdi_collections_compatibly(tmp_path):
@@ -204,4 +205,4 @@ def test_grdi_records_persist_with_sqlite_backend(tmp_path):
     )
 
     assert stored == envelope
-    assert reopened.ledger.verify_chain()["valid"] is True
+    assert_scoped_chain_valid(reopened.ledger, tenant_id="tenant-a", project_id="project-a")

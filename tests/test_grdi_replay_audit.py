@@ -4,6 +4,7 @@ from concurrent.futures import ThreadPoolExecutor
 from unittest.mock import patch
 
 import pytest
+from grdi_scoped_helpers import scoped_rows
 from test_grdi_foundation import _envelope
 from test_grdi_outcome_ledger import (
     _matched_assessment,
@@ -152,18 +153,11 @@ def test_manipulated_outcome_is_invalid(tmp_path):
 
 def test_invalid_ledger_chain_is_invalid(tmp_path):
     core, grdi, _, _, plan, _ = _full_chain(tmp_path)
-    rows = core.ledger.query("shadow_outcomes", tenant_id="tenant-a", project_id="project-a", limit=100000)
-    row = rows[0]
-    with core.ledger._lock:
-        payload = core.ledger._read()
-        for index, existing in enumerate(payload["shadow_outcomes"]):
-            if existing["outcome_id"] != row["outcome_id"]:
-                continue
-            broken = dict(existing)
-            broken["_chain"] = {**existing["_chain"], "hash": "broken-hash"}
-            payload["shadow_outcomes"][index] = broken
-            core.ledger._write(payload)
-            break
+    row = scoped_rows(core.ledger, "shadow_outcomes", tenant_id="tenant-a", project_id="project-a")[0]
+    state = core.ledger._scoped_engine._read_json_state()
+    key = f"tenant-a\0project-a\0shadow_outcomes\0{row['shadow_receipt_id']}"
+    state.records[key].payload_hash = "broken-hash"
+    core.ledger._scoped_engine._write_json_state(state)
     replay = grdi.create_replay_report(
         plan["plan_id"],
         tenant_id="tenant-a",
@@ -244,7 +238,7 @@ def test_drift_produces_new_manifest(tmp_path):
         project_id="project-a",
         requested_by="auditor-a",
     )
-    row = core.ledger.query("shadow_outcomes", tenant_id="tenant-a", project_id="project-a", limit=100000)[0]
+    row = scoped_rows(core.ledger, "shadow_outcomes", tenant_id="tenant-a", project_id="project-a")[0]
     signed = dict(row["signed_outcome"])
     signed["metrics"] = {"latency_ms": 99}
     assert core.receipt_signer is not None
@@ -535,7 +529,7 @@ def test_sqlite_persistence_and_restart(tmp_path):
 
 def test_record_hash_helper_is_stable(tmp_path):
     core, _, _, _, plan, _ = _full_chain(tmp_path)
-    row = core.ledger.query("execution_requests", tenant_id="tenant-a", project_id="project-a", limit=100000)[0]
+    row = scoped_rows(core.ledger, "execution_requests", tenant_id="tenant-a", project_id="project-a")[0]
     assert record_hash(row) == record_hash({**row, "_chain": {"hash": "different"}})
 
 
@@ -568,7 +562,7 @@ def test_source_drift_detected_on_read(tmp_path):
         project_id="project-a",
         requested_by="auditor-a",
     )
-    row = core.ledger.query("shadow_outcomes", tenant_id="tenant-a", project_id="project-a", limit=100000)[0]
+    row = scoped_rows(core.ledger, "shadow_outcomes", tenant_id="tenant-a", project_id="project-a")[0]
     signed = dict(row["signed_outcome"])
     signed["metrics"] = {"latency_ms": 42}
     assert core.receipt_signer is not None
@@ -655,7 +649,7 @@ def test_manipulated_prior_replay_not_used_as_baseline(tmp_path):
         project_id="project-a",
         requested_by="auditor-a",
     )
-    row = core.ledger.query("shadow_outcomes", tenant_id="tenant-a", project_id="project-a", limit=100000)[0]
+    row = scoped_rows(core.ledger, "shadow_outcomes", tenant_id="tenant-a", project_id="project-a")[0]
     signed = dict(row["signed_outcome"])
     signed["metrics"] = {"latency_ms": 11}
     assert core.receipt_signer is not None
