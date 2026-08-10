@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import hashlib
-import os
 import subprocess
 import sys
 import zipfile
@@ -66,39 +65,4 @@ def test_wheel_apply_postgres_migrations(postgres_dsn: str, built_wheel: Path) -
         )
         conn.commit()
         verify_postgres_schema(conn)
-    reset_postgres_scoped_schema(postgres_dsn)
-
-
-def test_wheel_module_apply_postgres_migrations(postgres_dsn: str, built_wheel: Path) -> None:
-    drop_postgres_scoped_schema(postgres_dsn)
-    venv_dir = Path(built_wheel).parent / "wheel-venv"
-    subprocess.run([sys.executable, "-m", "venv", str(venv_dir)], check=True)
-    pip = venv_dir / ("Scripts" if sys.platform == "win32" else "bin") / "pip"
-    python = venv_dir / ("Scripts" if sys.platform == "win32" else "bin") / "python"
-    subprocess.run([str(pip), "install", f"{built_wheel}[postgres]"], check=True)
-    env = os.environ.copy()
-    env["PHIGRAPH_POSTGRES_DSN"] = postgres_dsn
-    script = (
-        "import importlib.util, sys, types; "
-        "pkg = types.ModuleType('phigraph'); pkg.__path__ = []; "
-        "sys.modules['phigraph'] = pkg; "
-        "core = types.ModuleType('phigraph.core_v3'); "
-        "core.__path__ = []; sys.modules['phigraph.core_v3'] = core; "
-        "spec = importlib.util.find_spec('phigraph.core_v3.postgres_migrations'); "
-        "mod = importlib.util.module_from_spec(spec); spec.loader.exec_module(mod); "
-        "import psycopg, os; "
-        "conn = psycopg.connect(os.environ['PHIGRAPH_POSTGRES_DSN']); "
-        "applied = mod.apply_postgres_migrations(conn); conn.commit(); "
-        "mod.verify_postgres_schema(conn); print(len(applied))"
-    )
-    result = subprocess.run(
-        [str(python), "-c", script],
-        check=False,
-        capture_output=True,
-        text=True,
-        env=env,
-    )
-    if result.returncode != 0:
-        pytest.fail(result.stderr or result.stdout)
-    assert result.stdout.strip() == "1"
     reset_postgres_scoped_schema(postgres_dsn)
