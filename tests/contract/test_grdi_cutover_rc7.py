@@ -10,14 +10,12 @@ from grdi_rc7_legacy_fixtures import (
     register_rc7_mutable_simulated_without_receipt,
     register_rc7_simulated_plan,
 )
-from grdi_scoped_helpers import assert_scoped_chain_valid, scoped_rows
+from grdi_scoped_helpers import assert_scoped_chain_valid, mutate_scoped_row, scoped_rows
 from phigraph.core_v3.service import CoreV3Service
-from phigraph.core_v3.transactions import LEGACY_MIGRATABLE_SCOPED_COLLECTIONS
+from phigraph.core_v3.transactions import DuplicateCanonicalKey, LEGACY_MIGRATABLE_SCOPED_COLLECTIONS
 from phigraph.grdi import GRDIService, ShadowSimulationState
 from phigraph.grdi.events import deterministic_event_id
 from phigraph.grdi.migration import backfill_gateway_decision_events, cutover_grdi_scoped_ledger
-
-pytest.importorskip("psycopg")
 
 
 def _scoped_row_count(ledger, *, tenant_id: str, project_id: str) -> int:
@@ -112,6 +110,7 @@ def test_rc7_cutover_sqlite_backend(tmp_path, tenant_id, project_id) -> None:
 
 
 def test_rc7_cutover_postgres_backend(postgres_dsn, tmp_path, tenant_id, project_id) -> None:
+    pytest.importorskip("psycopg")
     core = CoreV3Service(
         data_dir=tmp_path,
         backend="postgres",
@@ -147,3 +146,39 @@ def test_backfill_does_not_infer_simulation_without_receipt(tmp_path, tenant_id,
     grdi = GRDIService(core)
     plan = grdi.get_execution_plan(plan_id, tenant_id=tenant_id, project_id=project_id)
     assert plan["current_gateway_state"]["simulation_state"] == ShadowSimulationState.NOT_SIMULATED.value
+
+
+def test_backfill_plan_is_atomic_on_conflict(tmp_path, tenant_id, project_id) -> None:
+    core = CoreV3Service(data_dir=tmp_path, receipt_signing_key="secret-rc7")
+    plan_id = register_rc7_simulated_plan(
+        core.ledger, core.receipt_signer, tenant_id=tenant_id, project_id=project_id
+    )
+    cutover_grdi_scoped_ledger(core.ledger)
+    events_before = scoped_rows(
+        core.ledger,
+        "gateway_decision_events",
+        tenant_id=tenant_id,
+        project_id=project_id,
+    )
+    created = next(event for event in events_before if event["event_type"] == "GATEWAY_DECISION_CREATED")
+    mutate_scoped_row(
+        core.ledger,
+        "gateway_decision_events",
+        "event_id",
+        created["event_id"],
+        {"occurred_at": "2099-01-01T00:00:00+00:00"},
+        tenant_id=tenant_id,
+        project_id=project_id,
+    )
+    with pytest.raises(DuplicateCanonicalKey):
+        backfill_gateway_decision_events(core.ledger, tenant_id=tenant_id, project_id=project_id)
+    events_after = scoped_rows(
+        core.ledger,
+        "gateway_decision_events",
+        tenant_id=tenant_id,
+        project_id=project_id,
+    )
+    assert len(events_after) == len(events_before)
+    grdi = GRDIService(core)
+    plan = grdi.get_execution_plan(plan_id, tenant_id=tenant_id, project_id=project_id)
+    assert len(plan["gateway_events"]) == 2

@@ -1,6 +1,6 @@
 # GRDI Transactional Refactor — Conformance Report
 
-**Branch:** `feature/grdi-transactional-ledger-refactor-v1`  
+**Branch:** `feature/grdi-transactional-ledger-refactor-v1`
 **Core:** 4.1.0-rc.8 · **GRDI:** 0.5.0 · **Gateway events:** 0.1.0 · **Transactional ledger:** 0.2.0
 
 ## Scope

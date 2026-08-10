@@ -2,18 +2,17 @@
 
 from __future__ import annotations
 
-from typing import Any, Iterator
+from typing import Any
 
 from phigraph.core_v3.backends import JsonLedgerBackend, PostgreSQLLedgerBackend, SQLiteLedgerBackend
 from phigraph.core_v3.ledger import EvidenceLedger
-from phigraph.core_v3.postgres_migrations import apply_postgres_migrations
 from phigraph.core_v3.transactions import (
     DuplicateCanonicalKey,
-    MAX_LIST_LIMIT,
     ScopedRecordNotFound,
     TransactionUnavailable,
 )
 from phigraph.grdi.events import build_gateway_decision_event_record, gateway_event_canonical
+from phigraph.grdi.ledger_ops import backfill_locks
 from phigraph.grdi.models import (
     ExecutionState,
     GatewayDecision,
@@ -31,55 +30,10 @@ def _gateway_from_scoped_row(row: dict[str, Any]) -> GatewayDecision:
     return GatewayDecision(**clean)
 
 
-def _iter_gateway_decision_rows(ledger: EvidenceLedger) -> Iterator[dict[str, Any]]:
-    engine = ledger._scoped_engine
-    backend = ledger.backend
-    if isinstance(backend, JsonLedgerBackend):
-        state = engine._read_json_state()
-        for row in state.records.values():
-            if row.collection == "gateway_decisions":
-                yield row.to_public()
-        return
-    if isinstance(backend, SQLiteLedgerBackend):
-        with backend._lock, backend._connect() as conn:
-            for raw in conn.execute(
-                """
-                SELECT payload FROM phigraph_scoped_ledger
-                WHERE collection = 'gateway_decisions'
-                ORDER BY tenant_id, project_id, chain_sequence
-                """
-            ).fetchall():
-                import json
-
-                yield json.loads(raw[0])
-        return
-    if isinstance(backend, PostgreSQLLedgerBackend):
-        import json
-
-        import psycopg
-
-        with psycopg.connect(backend.dsn) as conn:
-            for (payload_raw,) in conn.execute(
-                """
-                SELECT payload FROM phigraph_scoped_ledger
-                WHERE collection = 'gateway_decisions'
-                ORDER BY tenant_id, project_id, chain_sequence
-                """
-            ).fetchall():
-                payload = payload_raw if isinstance(payload_raw, dict) else json.loads(payload_raw)
-                yield payload
-        return
-    scopes: set[tuple[str, str]] = set()
-    for collection in ("gateway_decisions",):
-        _ = collection
-    for tenant_id, project_id in scopes:
-        rows = ledger.list_scoped(
-            "gateway_decisions",
-            tenant_id=tenant_id,
-            project_id=project_id,
-            limit=MAX_LIST_LIMIT,
-        )
-        yield from rows
+def _scope_from_row(row: dict[str, Any]) -> tuple[str, str]:
+    tenant_id = str(row.get("tenant_id") or row.get("scope", {}).get("tenant_id", "default"))
+    project_id = str(row.get("project_id") or row.get("scope", {}).get("project_id", "default"))
+    return tenant_id, project_id
 
 
 def migrate_grdi_scoped_ledger(ledger: EvidenceLedger) -> dict[str, Any]:
@@ -90,43 +44,31 @@ def migrate_grdi_scoped_ledger(ledger: EvidenceLedger) -> dict[str, Any]:
     elif isinstance(backend, SQLiteLedgerBackend):
         stats = ledger.migrate_legacy_scoped_sqlite()
     elif isinstance(backend, PostgreSQLLedgerBackend):
-        import psycopg
-
-        with psycopg.connect(backend.dsn) as conn:
-            apply_postgres_migrations(conn)
-            conn.commit()
+        ledger.ensure_postgres_scoped_migrations()
         stats = ledger.migrate_legacy_scoped_postgres()
     else:
         raise TransactionUnavailable(f"Unsupported backend for GRDI cutover: {type(backend)}")
     return {"legacy_migration": stats}
 
 
-def backfill_gateway_decision_events(
+def _backfill_plan_events(
     ledger: EvidenceLedger,
-    *,
-    tenant_id: str | None = None,
-    project_id: str | None = None,
-) -> dict[str, Any]:
-    """Create deterministic gateway events from scoped gateway rows and verified receipts."""
-    stats = {
-        "created_events": 0,
-        "skipped_events": 0,
-        "simulation_not_evaluated": 0,
-        "plans_processed": 0,
-    }
-    for row in _iter_gateway_decision_rows(ledger):
-        gateway = _gateway_from_scoped_row(row)
-        t_id = str(row.get("tenant_id") or row.get("scope", {}).get("tenant_id", "default"))
-        p_id = str(row.get("project_id") or row.get("scope", {}).get("project_id", "default"))
-        if tenant_id is not None and t_id != tenant_id:
-            continue
-        if project_id is not None and p_id != project_id:
-            continue
-        stats["plans_processed"] += 1
+    row: dict[str, Any],
+) -> dict[str, int]:
+    """Atomically backfill gateway events for one plan (all-or-nothing per plan)."""
+    gateway = _gateway_from_scoped_row(row)
+    tenant_id, project_id = _scope_from_row(row)
+    locks = backfill_locks(
+        plan_id=gateway.plan_id,
+        tenant_id=tenant_id,
+        project_id=project_id,
+    )
 
+    def _commit(session) -> dict[str, int]:
+        local = {"created_events": 0, "skipped_events": 0, "simulation_not_evaluated": 0}
         created_event = build_gateway_decision_event_record(
-            tenant_id=t_id,
-            project_id=p_id,
+            tenant_id=tenant_id,
+            project_id=project_id,
             plan_id=gateway.plan_id,
             gateway_decision_id=gateway.gateway_decision_id,
             event_type="GATEWAY_DECISION_CREATED",
@@ -134,49 +76,40 @@ def backfill_gateway_decision_events(
             source_record_id=gateway.gateway_decision_id,
         )
         created_key = gateway_event_canonical(gateway.plan_id, "GATEWAY_DECISION_CREATED")
-        try:
-            result = ledger.append_scoped_once(
-                "gateway_decision_events",
-                created_event,
-                canonical_key=created_key,
-                tenant_id=t_id,
-                project_id=p_id,
-            )
-            if result.created:
-                stats["created_events"] += 1
-            else:
-                stats["skipped_events"] += 1
-        except DuplicateCanonicalKey as exc:
-            raise DuplicateCanonicalKey(
-                f"Gateway event backfill conflict for {created_key}: {exc}"
-            ) from exc
+        created_result = session.append_scoped_once(
+            "gateway_decision_events",
+            created_event,
+            canonical_key=created_key,
+        )
+        if created_result.created:
+            local["created_events"] += 1
+        else:
+            local["skipped_events"] += 1
 
         legacy_simulated = str(row.get("simulation_state", "")) in {
             ShadowSimulationState.SIMULATED.value,
             "SIMULATED",
         }
         if not legacy_simulated:
-            continue
+            return local
 
         try:
-            receipt = ledger.get_scoped(
+            receipt = session.get_scoped(
                 "shadow_execution_receipts",
                 canonical_key=gateway.plan_id,
-                tenant_id=t_id,
-                project_id=p_id,
             )
         except ScopedRecordNotFound:
-            stats["simulation_not_evaluated"] += 1
-            continue
+            local["simulation_not_evaluated"] += 1
+            return local
 
         simulated_at = str(receipt.get("simulated_at", ""))
         if not simulated_at:
-            stats["simulation_not_evaluated"] += 1
-            continue
+            local["simulation_not_evaluated"] += 1
+            return local
 
         simulation_event = build_gateway_decision_event_record(
-            tenant_id=t_id,
-            project_id=p_id,
+            tenant_id=tenant_id,
+            project_id=project_id,
             plan_id=gateway.plan_id,
             gateway_decision_id=gateway.gateway_decision_id,
             event_type="SIMULATION_RECORDED",
@@ -185,22 +118,58 @@ def backfill_gateway_decision_events(
             source_record_id=str(receipt.get("receipt_id", "")),
         )
         simulation_key = gateway_event_canonical(gateway.plan_id, "SIMULATION_RECORDED")
-        try:
-            result = ledger.append_scoped_once(
-                "gateway_decision_events",
-                simulation_event,
-                canonical_key=simulation_key,
-                tenant_id=t_id,
-                project_id=p_id,
-            )
-            if result.created:
-                stats["created_events"] += 1
-            else:
-                stats["skipped_events"] += 1
-        except DuplicateCanonicalKey as exc:
-            raise DuplicateCanonicalKey(
-                f"Gateway event backfill conflict for {simulation_key}: {exc}"
-            ) from exc
+        simulation_result = session.append_scoped_once(
+            "gateway_decision_events",
+            simulation_event,
+            canonical_key=simulation_key,
+        )
+        if simulation_result.created:
+            local["created_events"] += 1
+        else:
+            local["skipped_events"] += 1
+        return local
+
+    try:
+        return ledger.run_scoped_transaction(tenant_id, project_id, locks, _commit)
+    except DuplicateCanonicalKey as exc:
+        raise DuplicateCanonicalKey(
+            f"Gateway event backfill conflict for plan {gateway.plan_id}: {exc}"
+        ) from exc
+
+
+def backfill_gateway_decision_events(
+    ledger: EvidenceLedger,
+    *,
+    tenant_id: str | None = None,
+    project_id: str | None = None,
+) -> dict[str, Any]:
+    """Create deterministic gateway events from scoped gateway rows and verified receipts.
+
+    Atomicity is per plan: a conflict or error rolls back all event writes for that plan.
+    Plans are processed sequentially; scope filters apply when provided.
+    """
+    stats = {
+        "created_events": 0,
+        "skipped_events": 0,
+        "simulation_not_evaluated": 0,
+        "plans_processed": 0,
+    }
+    rows = ledger.admin_list_scoped(
+        "gateway_decisions",
+        tenant_id=tenant_id,
+        project_id=project_id,
+    )
+    for row in rows:
+        row_tenant_id, row_project_id = _scope_from_row(row)
+        if tenant_id is not None and row_tenant_id != tenant_id:
+            continue
+        if project_id is not None and row_project_id != project_id:
+            continue
+        stats["plans_processed"] += 1
+        plan_stats = _backfill_plan_events(ledger, row)
+        stats["created_events"] += plan_stats["created_events"]
+        stats["skipped_events"] += plan_stats["skipped_events"]
+        stats["simulation_not_evaluated"] += plan_stats["simulation_not_evaluated"]
 
     ledger.verify_scoped_chain(tenant_id=tenant_id, project_id=project_id)
     return stats

@@ -3,7 +3,7 @@ from __future__ import annotations
 from concurrent.futures import ThreadPoolExecutor
 
 import pytest
-from grdi_scoped_helpers import assert_scoped_chain_valid, mutate_scoped_row, scoped_rows
+from grdi_scoped_helpers import assert_scoped_chain_valid, delete_scoped_row, mutate_scoped_row, scoped_rows
 from test_grdi_foundation import _envelope, _receipt
 
 from phigraph.core_v3.service import CoreV3Service
@@ -441,6 +441,47 @@ def test_revalidation_after_service_restart(tmp_path):
     )
     assert replay["shadow_receipt"]["receipt_id"] == first["shadow_receipt"]["receipt_id"]
     assert replay["plan"]["flow_state"]["simulation"] == ShadowSimulationState.SIMULATED.value
+
+
+def test_simulate_ensures_simulation_event_when_receipt_exists_without_event(tmp_path):
+    core, grdi, envelope, decision = _authorized_setup(tmp_path)
+    plan = grdi.create_execution_plan(
+        **_plan_body(envelope, decision),
+        tenant_id="tenant-a",
+        project_id="project-a",
+        requested_by="operator-a",
+    )
+    first = grdi.simulate_execution_plan(plan["plan_id"], tenant_id="tenant-a", project_id="project-a")
+    events_before = scoped_rows(
+        core.ledger,
+        "gateway_decision_events",
+        tenant_id="tenant-a",
+        project_id="project-a",
+    )
+    simulation_events = [event for event in events_before if event["event_type"] == "SIMULATION_RECORDED"]
+    assert len(simulation_events) == 1
+
+    delete_scoped_row(
+        core.ledger,
+        "gateway_decision_events",
+        f"{plan['plan_id']}:SIMULATION_RECORDED",
+        tenant_id="tenant-a",
+        project_id="project-a",
+    )
+    plan_without_event = grdi.get_execution_plan(plan["plan_id"], tenant_id="tenant-a", project_id="project-a")
+    assert plan_without_event["current_gateway_state"]["simulation_state"] == ShadowSimulationState.NOT_SIMULATED.value
+
+    second = grdi.simulate_execution_plan(plan["plan_id"], tenant_id="tenant-a", project_id="project-a")
+    assert second["shadow_receipt"]["receipt_id"] == first["shadow_receipt"]["receipt_id"]
+    events_after = scoped_rows(
+        core.ledger,
+        "gateway_decision_events",
+        tenant_id="tenant-a",
+        project_id="project-a",
+    )
+    simulation_after = [event for event in events_after if event["event_type"] == "SIMULATION_RECORDED"]
+    assert len(simulation_after) == 1
+    assert second["plan"]["flow_state"]["simulation"] == ShadowSimulationState.SIMULATED.value
 
 
 def test_action_hash_helper_is_stable():

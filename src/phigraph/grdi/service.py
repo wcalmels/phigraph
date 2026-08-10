@@ -11,10 +11,12 @@ from phigraph.grdi.execution_gateway import ExecutionGateway
 from phigraph.grdi.ledger_ops import (
     authority_locks,
     comparison_locks,
+    comparison_snapshot_locks,
     envelope_locks,
     execution_plan_locks,
     outcome_locks,
     replay_locks,
+    replay_snapshot_locks,
     simulation_locks,
 )
 from phigraph.grdi.models import (
@@ -246,17 +248,27 @@ class GRDIService:
         )
 
         def _commit(session) -> ShadowExecutionReceipt:
-            try:
-                receipt_row = session.get_scoped("shadow_execution_receipts", canonical_key=plan_id)
-                receipt = self._shadow_receipt_from_row(receipt_row)
-                return self._validate_shadow_receipt(receipt, request)
-            except ScopedRecordNotFound:
-                pass
-
             request_row = session.get_scoped("execution_requests", canonical_key=plan_id)
             loaded_request = self._execution_request_from_row(request_row)
             gateway_row = session.get_scoped("gateway_decisions", canonical_key=plan_id)
             stored_gateway = self._gateway_from_row(gateway_row)
+
+            try:
+                receipt_row = session.get_scoped("shadow_execution_receipts", canonical_key=plan_id)
+                receipt = self._shadow_receipt_from_row(receipt_row)
+                receipt = self._validate_shadow_receipt(receipt, loaded_request)
+                self._ensure_simulation_event(
+                    session,
+                    plan_id=plan_id,
+                    gateway=stored_gateway,
+                    receipt=receipt,
+                    tenant_id=tenant_id,
+                    project_id=project_id,
+                )
+                return receipt
+            except ScopedRecordNotFound:
+                pass
+
             authority_row = session.get_scoped(
                 "authority_decisions",
                 canonical_key=loaded_request.authority_decision_id,
@@ -288,22 +300,14 @@ class GRDIService:
             )
             receipt = self._shadow_receipt_from_row(stored_result.record)
             receipt = self._validate_shadow_receipt(receipt, loaded_request)
-            if stored_result.created:
-                simulation_event = build_gateway_decision_event_record(
-                    tenant_id=tenant_id,
-                    project_id=project_id,
-                    plan_id=plan_id,
-                    gateway_decision_id=stored_gateway.gateway_decision_id,
-                    event_type="SIMULATION_RECORDED",
-                    occurred_at=receipt.simulated_at,
-                    shadow_receipt_id=receipt.receipt_id,
-                    source_record_id=receipt.receipt_id,
-                )
-                session.append_scoped_once(
-                    "gateway_decision_events",
-                    simulation_event,
-                    canonical_key=gateway_event_canonical(plan_id, "SIMULATION_RECORDED"),
-                )
+            self._ensure_simulation_event(
+                session,
+                plan_id=plan_id,
+                gateway=stored_gateway,
+                receipt=receipt,
+                tenant_id=tenant_id,
+                project_id=project_id,
+            )
             return receipt
 
         receipt = self.core.ledger.run_scoped_transaction(tenant_id, project_id, locks, _commit)
@@ -446,13 +450,21 @@ class GRDIService:
         requested_by: str,
     ) -> dict[str, Any]:
         self._get_execution_request(plan_id, tenant_id=tenant_id, project_id=project_id)
-        report = self.replay.build_report(
-            plan_id,
-            tenant_id=tenant_id,
-            project_id=project_id,
-            requested_by=requested_by,
-        )
-        locks = replay_locks(
+        snapshot_locks = replay_snapshot_locks(plan_id=plan_id, tenant_id=tenant_id, project_id=project_id)
+        snapshot: dict[str, Any] = {}
+
+        def _snapshot(session) -> None:
+            snapshot["report"] = self.replay.build_report(
+                plan_id,
+                tenant_id=tenant_id,
+                project_id=project_id,
+                requested_by=requested_by,
+                session=session,
+            )
+
+        self.core.ledger.run_scoped_transaction(tenant_id, project_id, snapshot_locks, _snapshot)
+        report = snapshot["report"]
+        persist_locks = snapshot_locks + replay_locks(
             plan_id=plan_id,
             manifest_hash=report.manifest_hash,
             tenant_id=tenant_id,
@@ -460,10 +472,19 @@ class GRDIService:
         )
 
         def _commit(session) -> dict[str, Any]:
+            rebuilt = self.replay.build_report(
+                plan_id,
+                tenant_id=tenant_id,
+                project_id=project_id,
+                requested_by=requested_by,
+                session=session,
+            )
+            if rebuilt.manifest_hash != report.manifest_hash:
+                raise ValueError("replay_snapshot_changed_during_persist")
             try:
                 existing = session.get_scoped(
                     "replay_reports",
-                    canonical_key=report.manifest_hash,
+                    canonical_key=rebuilt.manifest_hash,
                 )
                 stored = ReplayReport.from_dict(self._strip_scoped_metadata(existing))
                 return self.replay.validate_report(stored, verify_sources=False).to_dict()
@@ -471,13 +492,13 @@ class GRDIService:
                 pass
             stored_result = session.append_scoped_once(
                 "replay_reports",
-                report.to_dict(),
-                canonical_key=report.manifest_hash,
+                rebuilt.to_dict(),
+                canonical_key=rebuilt.manifest_hash,
             )
             stored = ReplayReport.from_dict(self._strip_scoped_metadata(stored_result.record))
             return self.replay.validate_report(stored, verify_sources=False).to_dict()
 
-        return self.core.ledger.run_scoped_transaction(tenant_id, project_id, locks, _commit)
+        return self.core.ledger.run_scoped_transaction(tenant_id, project_id, persist_locks, _commit)
 
     def get_replay_report(self, replay_id: str, *, tenant_id: str, project_id: str) -> dict[str, Any]:
         row = self._get_replay_row(replay_id, tenant_id=tenant_id, project_id=project_id)
@@ -509,12 +530,20 @@ class GRDIService:
         project_id: str,
         requested_by: str,
     ) -> dict[str, Any]:
-        baseline_row = self._get_replay_row(baseline_replay_id, tenant_id=tenant_id, project_id=project_id)
-        candidate_row = self._get_replay_row(candidate_replay_id, tenant_id=tenant_id, project_id=project_id)
-        baseline = ReplayReport.from_dict(baseline_row)
-        candidate = ReplayReport.from_dict(candidate_row)
+        snapshot_locks = comparison_snapshot_locks(tenant_id=tenant_id, project_id=project_id)
+        loaded: dict[str, ReplayReport] = {}
+
+        def _load(session) -> None:
+            baseline_row = self._find_replay_row_in_session(session, baseline_replay_id)
+            candidate_row = self._find_replay_row_in_session(session, candidate_replay_id)
+            loaded["baseline"] = ReplayReport.from_dict(baseline_row)
+            loaded["candidate"] = ReplayReport.from_dict(candidate_row)
+
+        self.core.ledger.run_scoped_transaction(tenant_id, project_id, snapshot_locks, _load)
+        baseline = loaded["baseline"]
+        candidate = loaded["candidate"]
         key = comparison_key(baseline_replay_id, candidate_replay_id)
-        locks = comparison_locks(
+        persist_locks = snapshot_locks + comparison_locks(
             baseline_manifest_hash=baseline.manifest_hash,
             candidate_manifest_hash=candidate.manifest_hash,
             comparison_key=key,
@@ -523,7 +552,19 @@ class GRDIService:
         )
 
         def _commit(session) -> dict[str, Any]:
-            comparison = self.replay.compare_reports(baseline, candidate, requested_by=requested_by)
+            baseline_row = self._find_replay_row_in_session(session, baseline_replay_id)
+            candidate_row = self._find_replay_row_in_session(session, candidate_replay_id)
+            baseline_fresh = ReplayReport.from_dict(baseline_row)
+            candidate_fresh = ReplayReport.from_dict(candidate_row)
+            if baseline_fresh.manifest_hash != baseline.manifest_hash:
+                raise ValueError("comparison_baseline_changed_during_persist")
+            if candidate_fresh.manifest_hash != candidate.manifest_hash:
+                raise ValueError("comparison_candidate_changed_during_persist")
+            comparison = self.replay.compare_reports(
+                baseline_fresh,
+                candidate_fresh,
+                requested_by=requested_by,
+            )
             try:
                 existing = session.get_scoped(
                     "historical_comparisons",
@@ -541,7 +582,7 @@ class GRDIService:
             stored = HistoricalComparison.from_dict(self._strip_scoped_metadata(stored_result.record))
             return self.replay.validate_comparison(stored).to_dict()
 
-        return self.core.ledger.run_scoped_transaction(tenant_id, project_id, locks, _commit)
+        return self.core.ledger.run_scoped_transaction(tenant_id, project_id, persist_locks, _commit)
 
     def get_historical_comparison(
         self,
@@ -634,6 +675,47 @@ class GRDIService:
         if row is None:
             raise KeyError("replay_report_not_found_in_scope")
         return row
+
+    @staticmethod
+    def _find_replay_row_in_session(session, replay_id: str) -> dict[str, Any]:
+        rows = session.list_scoped("replay_reports", limit=MAX_LIST_LIMIT)
+        row = next(
+            (
+                {key: value for key, value in item.items() if key not in {"_chain", "scope"}}
+                for item in rows
+                if item.get("replay_id") == replay_id
+            ),
+            None,
+        )
+        if row is None:
+            raise KeyError("replay_report_not_found_in_scope")
+        return row
+
+    def _ensure_simulation_event(
+        self,
+        session,
+        *,
+        plan_id: str,
+        gateway: GatewayDecision,
+        receipt: ShadowExecutionReceipt,
+        tenant_id: str,
+        project_id: str,
+    ) -> None:
+        simulation_event = build_gateway_decision_event_record(
+            tenant_id=tenant_id,
+            project_id=project_id,
+            plan_id=plan_id,
+            gateway_decision_id=gateway.gateway_decision_id,
+            event_type="SIMULATION_RECORDED",
+            occurred_at=receipt.simulated_at,
+            shadow_receipt_id=receipt.receipt_id,
+            source_record_id=receipt.receipt_id,
+        )
+        session.append_scoped_once(
+            "gateway_decision_events",
+            simulation_event,
+            canonical_key=gateway_event_canonical(plan_id, "SIMULATION_RECORDED"),
+        )
 
     @staticmethod
     def _strip_scoped_metadata(row: dict[str, Any]) -> dict[str, Any]:

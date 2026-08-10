@@ -434,6 +434,50 @@ class PostgresScopedEngine:
             if close and conn is not None:
                 conn.close()
 
+    def admin_list_scoped(
+        self,
+        collection: str,
+        *,
+        tenant_id: str | None = None,
+        project_id: str | None = None,
+        limit: int = MAX_LIST_LIMIT,
+        offset: int = 0,
+    ) -> list[dict[str, Any]]:
+        validate_collection(collection, read=True)
+        if offset < 0:
+            raise ValueError("offset must be non-negative")
+        if limit < 1 or limit > MAX_LIST_LIMIT:
+            raise ValueError(f"limit must be between 1 and {MAX_LIST_LIMIT}")
+        clauses = ["collection = %s"]
+        params: list[Any] = [collection]
+        if tenant_id is not None:
+            clauses.append("tenant_id = %s")
+            params.append(tenant_id)
+        if project_id is not None:
+            clauses.append("project_id = %s")
+            params.append(project_id)
+        params.extend([limit, offset])
+        query = f"""
+            SELECT payload FROM phigraph_scoped_ledger
+            WHERE {' AND '.join(clauses)}
+            ORDER BY tenant_id, project_id, chain_sequence ASC, record_id ASC
+            LIMIT %s OFFSET %s
+        """
+        tls = self._tls()
+        conn = tls.postgres_conn
+        close = conn is None
+        if close:
+            conn = self._backend._connect()
+        try:
+            rows = conn.execute(query, tuple(params)).fetchall()
+            return [
+                (raw if isinstance(raw, dict) else json.loads(raw))
+                for (raw,) in rows
+            ]
+        finally:
+            if close and conn is not None:
+                conn.close()
+
     def compare_and_set_scoped(
         self,
         collection: str,

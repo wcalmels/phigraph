@@ -1,7 +1,7 @@
 # GRDI Gateway Decision Events Protocol v0.1.0
 
-**Status:** normative for Core 4.1.0-rc.8 / GRDI 0.5.0  
-**Collection:** `gateway_decision_events`  
+**Status:** normative for Core 4.1.0-rc.8 / GRDI 0.5.0
+**Collection:** `gateway_decision_events`
 **Canonical key:** `plan_id:event_type`
 
 ## Purpose

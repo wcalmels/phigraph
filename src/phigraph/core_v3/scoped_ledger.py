@@ -905,6 +905,77 @@ class ScopedLedgerEngine:
             )
         raise TransactionUnavailable("Scoped list is not implemented for this backend")
 
+    def admin_list_scoped(
+        self,
+        collection: str,
+        *,
+        tenant_id: str | None = None,
+        project_id: str | None = None,
+        limit: int = MAX_LIST_LIMIT,
+        offset: int = 0,
+    ) -> list[dict[str, Any]]:
+        """Administrative scoped listing with optional scope filter (cutover/backfill)."""
+        if tenant_id is not None and project_id is not None:
+            return self._list_scoped(
+                collection,
+                tenant_id=tenant_id,
+                project_id=project_id,
+                limit=limit,
+                offset=offset,
+            )
+        validate_collection(collection, read=True)
+        if offset < 0:
+            raise ValueError("offset must be non-negative")
+        if limit < 1 or limit > MAX_LIST_LIMIT:
+            raise ValueError(f"limit must be between 1 and {MAX_LIST_LIMIT}")
+        self._ensure_multiprocess_json_allowed()
+        if isinstance(self.backend, JsonLedgerBackend):
+            with self._lock:
+                state = self._active_state() if self._tls().tx_depth else self._read_json_state()
+            rows = [row for row in state.records.values() if row.collection == collection]
+            if tenant_id is not None:
+                rows = [row for row in rows if row.tenant_id == tenant_id]
+            if project_id is not None:
+                rows = [row for row in rows if row.project_id == project_id]
+            rows.sort(key=lambda item: (item.tenant_id, item.project_id, item.chain_sequence, item.record_id))
+            return [row.to_public() for row in rows[offset:offset + limit]]
+        if isinstance(self.backend, SQLiteLedgerBackend):
+            clauses = ["collection=?"]
+            params: list[Any] = [collection]
+            if tenant_id is not None:
+                clauses.append("tenant_id=?")
+                params.append(tenant_id)
+            if project_id is not None:
+                clauses.append("project_id=?")
+                params.append(project_id)
+            params.extend([limit, offset])
+            query = f"""
+                SELECT payload FROM phigraph_scoped_ledger
+                WHERE {' AND '.join(clauses)}
+                ORDER BY tenant_id, project_id, chain_sequence ASC, record_id ASC
+                LIMIT ? OFFSET ?
+            """
+            tls = self._tls()
+            conn = tls.sqlite_conn
+            close = conn is None
+            if close:
+                conn = self.backend._connect()
+            try:
+                fetched = conn.execute(query, tuple(params)).fetchall()
+                return [json.loads(item[0]) for item in fetched]
+            finally:
+                if close and conn is not None:
+                    conn.close()
+        if self._postgres is not None:
+            return self._postgres.admin_list_scoped(
+                collection,
+                tenant_id=tenant_id,
+                project_id=project_id,
+                limit=limit,
+                offset=offset,
+            )
+        raise TransactionUnavailable("Administrative scoped list is not implemented for this backend")
+
     def _compare_and_set_scoped(
         self,
         collection: str,

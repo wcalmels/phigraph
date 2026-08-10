@@ -269,7 +269,14 @@ def _verify_partial_chain_index(conn: Any) -> None:
             )
 
 
+def _schema_migrations_table_exists(conn: Any) -> bool:
+    row = conn.execute("SELECT to_regclass('public.phigraph_schema_migrations')").fetchone()
+    return row is not None and row[0] is not None
+
+
 def _migration_checksum_row(conn: Any, version: str) -> str | None:
+    if not _schema_migrations_table_exists(conn):
+        return None
     row = conn.execute(
         """
         SELECT checksum FROM phigraph_schema_migrations
@@ -295,6 +302,10 @@ def apply_postgres_migrations(conn: Any) -> list[str]:
                 )
             continue
         conn.execute(load_postgres_migration_sql(filename))
+        if not _schema_migrations_table_exists(conn):
+            raise TransactionUnavailable(
+                f"PostgreSQL migration {version} did not create phigraph_schema_migrations"
+            )
         conn.execute(
             """
             INSERT INTO phigraph_schema_migrations (version, checksum)

@@ -13,6 +13,7 @@ from phigraph.core_v3.transactions import (
     MAX_LIST_LIMIT,
     canonical_scoped_payload_hash,
     chain_record_hash,
+    gateway_event_canonical_key,
 )
 
 
@@ -137,8 +138,11 @@ def mutate_scoped_row(
     row = next(item for item in rows if item[unique_key] == record_id)
     clean = {key: value for key, value in row.items() if key not in {"_chain", "scope"}}
     clean.update(changes)
-    canonical_field = LEGACY_CANONICAL_KEY_FIELDS[collection]
-    canonical_key = str(clean[canonical_field])
+    if collection == "gateway_decision_events":
+        canonical_key = gateway_event_canonical_key(str(clean["plan_id"]), str(clean["event_type"]))
+    else:
+        canonical_field = LEGACY_CANONICAL_KEY_FIELDS[collection]
+        canonical_key = str(clean[canonical_field])
 
     if isinstance(ledger.backend, JsonLedgerBackend):
         state = ledger._scoped_engine._read_json_state()
@@ -220,3 +224,45 @@ def mutate_scoped_row(
         return
 
     raise RuntimeError("mutate_scoped_row supports JSON and SQLite backends only")
+
+
+def delete_scoped_row(
+    ledger: EvidenceLedger,
+    collection: str,
+    canonical_key: str,
+    *,
+    tenant_id: str,
+    project_id: str,
+) -> None:
+    """TEST_ONLY removal of a scoped row by canonical key."""
+    if isinstance(ledger.backend, JsonLedgerBackend):
+        state = ledger._scoped_engine._read_json_state()
+        key = f"{tenant_id}\0{project_id}\0{collection}\0{canonical_key}"
+        if key not in state.records:
+            raise KeyError(f"scoped_record_not_found:{canonical_key}")
+        stored = state.records.pop(key)
+        if stored.chain_linked:
+            head_key = f"{tenant_id}\0{project_id}\0{collection}"
+            head = state.heads.get(head_key)
+            if head is not None and int(head.get("last_sequence", 0)) == stored.chain_sequence:
+                previous = stored.chain_prev
+                state.heads[head_key] = {
+                    **head,
+                    "last_sequence": max(0, stored.chain_sequence - 1),
+                    "last_chain_hash": previous,
+                }
+        ledger._scoped_engine._write_json_state(state)
+        return
+    if isinstance(ledger.backend, SQLiteLedgerBackend):
+        backend = ledger.backend
+        with backend._lock, backend._connect() as conn:
+            conn.execute(
+                """
+                DELETE FROM phigraph_scoped_ledger
+                WHERE tenant_id=? AND project_id=? AND collection=? AND canonical_key=?
+                """,
+                (tenant_id, project_id, collection, canonical_key),
+            )
+            conn.commit()
+        return
+    raise RuntimeError("delete_scoped_row supports JSON and SQLite backends only")

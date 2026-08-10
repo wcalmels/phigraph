@@ -151,6 +151,59 @@ def outcome_locks(
     )
 
 
+def backfill_locks(
+    *,
+    plan_id: str,
+    tenant_id: str,
+    project_id: str,
+) -> tuple[LockRef, ...]:
+    created_event_key = gateway_event_canonical_key(plan_id, "GATEWAY_DECISION_CREATED")
+    simulation_event_key = gateway_event_canonical_key(plan_id, "SIMULATION_RECORDED")
+    return (
+        canonical_lock("gateway_decisions", plan_id, tenant_id=tenant_id, project_id=project_id),
+        canonical_lock(
+            "shadow_execution_receipts",
+            plan_id,
+            tenant_id=tenant_id,
+            project_id=project_id,
+        ),
+        chain_lock("gateway_decision_events", tenant_id=tenant_id, project_id=project_id),
+        canonical_lock(
+            "gateway_decision_events",
+            created_event_key,
+            tenant_id=tenant_id,
+            project_id=project_id,
+        ),
+        canonical_lock(
+            "gateway_decision_events",
+            simulation_event_key,
+            tenant_id=tenant_id,
+            project_id=project_id,
+        ),
+    )
+
+
+def replay_snapshot_locks(*, plan_id: str, tenant_id: str, project_id: str) -> tuple[LockRef, ...]:
+    return (
+        chain_lock("decision_envelopes", tenant_id=tenant_id, project_id=project_id),
+        chain_lock("authority_decisions", tenant_id=tenant_id, project_id=project_id),
+        chain_lock("execution_requests", tenant_id=tenant_id, project_id=project_id),
+        chain_lock("gateway_decisions", tenant_id=tenant_id, project_id=project_id),
+        chain_lock("gateway_decision_events", tenant_id=tenant_id, project_id=project_id),
+        chain_lock("shadow_execution_receipts", tenant_id=tenant_id, project_id=project_id),
+        chain_lock("shadow_outcomes", tenant_id=tenant_id, project_id=project_id),
+        chain_lock("replay_reports", tenant_id=tenant_id, project_id=project_id),
+        canonical_lock("execution_requests", plan_id, tenant_id=tenant_id, project_id=project_id),
+    )
+
+
+def comparison_snapshot_locks(*, tenant_id: str, project_id: str) -> tuple[LockRef, ...]:
+    return (
+        chain_lock("replay_reports", tenant_id=tenant_id, project_id=project_id),
+        chain_lock("historical_comparisons", tenant_id=tenant_id, project_id=project_id),
+    )
+
+
 def replay_locks(*, plan_id: str, manifest_hash: str, tenant_id: str, project_id: str) -> tuple[LockRef, ...]:
     return (
         canonical_lock("execution_requests", plan_id, tenant_id=tenant_id, project_id=project_id),

@@ -742,3 +742,55 @@ def test_unrelated_plan_does_not_change_snapshot_identity(tmp_path):
     )
     assert second["manifest_hash"] == first["manifest_hash"]
     assert second["replay_id"] == first["replay_id"]
+
+
+def test_validated_prior_reports_skips_keyerror_corrupt_replay(tmp_path):
+    core, grdi, _, _, plan, _ = _full_chain(tmp_path)
+    first = grdi.create_replay_report(
+        plan["plan_id"],
+        tenant_id="tenant-a",
+        project_id="project-a",
+        requested_by="auditor-a",
+    )
+    _mutate_ledger_row(
+        core,
+        "replay_reports",
+        "replay_id",
+        first["replay_id"],
+        {"signed_replay": {"replay_id": first["replay_id"]}},
+        tenant_id="tenant-a",
+        project_id="project-a",
+    )
+    prior_valid, skipped = grdi.replay._validated_prior_reports(
+        plan["plan_id"],
+        tenant_id="tenant-a",
+        project_id="project-a",
+    )
+    assert prior_valid == []
+    assert any("prior_replay_invalid" in reason for reason in skipped)
+
+
+def test_validated_prior_reports_skips_typeerror_corrupt_replay(tmp_path):
+    core, grdi, _, _, plan, _ = _full_chain(tmp_path)
+    first = grdi.create_replay_report(
+        plan["plan_id"],
+        tenant_id="tenant-a",
+        project_id="project-a",
+        requested_by="auditor-a",
+    )
+    _mutate_ledger_row(
+        core,
+        "replay_reports",
+        "replay_id",
+        first["replay_id"],
+        {"validation_results": 123},
+        tenant_id="tenant-a",
+        project_id="project-a",
+    )
+    prior_valid, skipped = grdi.replay._validated_prior_reports(
+        plan["plan_id"],
+        tenant_id="tenant-a",
+        project_id="project-a",
+    )
+    assert prior_valid == []
+    assert any("prior_replay_invalid" in reason for reason in skipped)

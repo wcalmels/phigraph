@@ -1,7 +1,7 @@
 # ADR-022: GRDI transactional ledger refactor (gateway events v1)
 
-**Status:** accepted — Core 4.1.0-rc.8 / GRDI 0.5.0  
-**Companion:** `docs/protocol/GRDI_GATEWAY_DECISION_EVENTS_PROTOCOL_V1.md`  
+**Status:** accepted — Core 4.1.0-rc.8 / GRDI 0.5.0
+**Companion:** `docs/protocol/GRDI_GATEWAY_DECISION_EVENTS_PROTOCOL_V1.md`
 **Builds on:** ADR-020, ADR-021, PR #16
 
 ## Decision

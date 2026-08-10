@@ -28,6 +28,7 @@ from .scoped_ledger import (
 from .transactions import (
     CompareAndSetResult,
     LockRef,
+    MAX_LIST_LIMIT,
     ScopedRecordResult,
     TransactionUnavailable,
     canonical_scoped_payload_hash,
@@ -485,3 +486,34 @@ class EvidenceLedger:
         if not isinstance(self.backend, JsonLedgerBackend):
             raise TransactionUnavailable("migrate_legacy_scoped_json requires JSON backend")
         return migrate_legacy_scoped_json(self)
+
+    def admin_list_scoped(
+        self,
+        collection: str,
+        *,
+        tenant_id: str | None = None,
+        project_id: str | None = None,
+        limit: int = MAX_LIST_LIMIT,
+        offset: int = 0,
+    ) -> list[dict[str, Any]]:
+        """Administrative scoped listing with optional scope filter."""
+        return self._scoped_engine.admin_list_scoped(
+            collection,
+            tenant_id=tenant_id,
+            project_id=project_id,
+            limit=limit,
+            offset=offset,
+        )
+
+    def ensure_postgres_scoped_migrations(self) -> list[str]:
+        """Apply pending PostgreSQL scoped schema migrations (admin/cutover)."""
+        if not isinstance(self.backend, PostgreSQLLedgerBackend):
+            raise TransactionUnavailable("ensure_postgres_scoped_migrations requires PostgreSQL backend")
+        import psycopg
+
+        from .postgres_migrations import apply_postgres_migrations
+
+        with psycopg.connect(self.backend.dsn) as conn:
+            applied = apply_postgres_migrations(conn)
+            conn.commit()
+        return applied

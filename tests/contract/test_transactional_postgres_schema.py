@@ -42,6 +42,20 @@ def test_root_migration_matches_package_sql() -> None:
     assert root_sql == packaged
 
 
+def test_apply_migrations_on_empty_database(postgres_dsn):
+    import psycopg
+
+    drop_postgres_scoped_schema(postgres_dsn)
+    with psycopg.connect(postgres_dsn) as conn:
+        applied = apply_postgres_migrations(conn)
+        conn.commit()
+        verify_postgres_schema(conn)
+        assert applied == [version for version, _ in ORDERED_POSTGRES_MIGRATIONS]
+        second = apply_postgres_migrations(conn)
+        assert second == []
+    reset_postgres_scoped_schema(postgres_dsn)
+
+
 def test_apply_migrations_idempotent(postgres_dsn):
     import psycopg
 
