@@ -454,10 +454,15 @@ def test_migration_verify_failure_rolls_back(postgres_dsn, monkeypatch):
 
     monkeypatch.setattr(pm, "verify_postgres_schema", fail_when_002_registered)
 
-    with psycopg.connect(postgres_dsn) as conn:
+    conn = psycopg.connect(postgres_dsn)
+    try:
         with pytest.raises(TransactionUnavailable, match="simulated structural verify failure"):
             pm.apply_postgres_migrations(conn)
+    finally:
         conn.rollback()
+        conn.close()
+
+    monkeypatch.setattr(pm, "verify_postgres_schema", original_verify)
 
     with psycopg.connect(postgres_dsn) as conn:
         assert pm._migration_checksum_row(conn, GATEWAY_EVENTS_MIGRATION_VERSION) is None
