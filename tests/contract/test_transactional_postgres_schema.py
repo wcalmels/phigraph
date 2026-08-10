@@ -11,6 +11,7 @@ from phigraph.core_v3.postgres_migrations import (
     ORDERED_POSTGRES_MIGRATIONS,
     SCOPED_LEDGER_MIGRATION_VERSION,
     apply_postgres_migrations,
+    bootstrap_postgres_scoped_schema,
     drop_postgres_scoped_schema,
     gateway_events_migration_checksum,
     load_gateway_events_migration_sql,
@@ -224,20 +225,74 @@ def test_verify_schema_checksum_mismatch(postgres_dsn):
     _reset_scoped_schema(postgres_dsn)
 
 
-def test_postgres_engine_rejects_unmigrated_schema(postgres_dsn):
+def test_postgres_engine_auto_applies_pending_migrations(postgres_dsn):
+    """RC7 databases with only 001 migrate to 002 when EvidenceLedger connects."""
+    import psycopg
+
+    drop_postgres_scoped_schema(postgres_dsn)
+    with psycopg.connect(postgres_dsn) as conn:
+        conn.execute(load_postgres_migration_sql("001_scoped_ledger_v1.sql"))
+        conn.execute(
+            """
+            INSERT INTO phigraph_schema_migrations (version, checksum)
+            VALUES (%s, %s)
+            """,
+            (SCOPED_LEDGER_MIGRATION_VERSION, postgres_migration_checksum("001_scoped_ledger_v1.sql")),
+        )
+        conn.commit()
+        with pytest.raises(TransactionUnavailable, match="002_gateway_decision_events"):
+            verify_postgres_schema(conn)
+
+    backend = PostgreSQLLedgerBackend(postgres_dsn, EvidenceLedger.COLLECTIONS)
+    EvidenceLedger(backend=backend)
+
+    with psycopg.connect(postgres_dsn) as conn:
+        verify_postgres_schema(conn)
+    reset_postgres_scoped_schema(postgres_dsn)
+
+
+def test_bootstrap_postgres_scoped_schema_rc7_upgrade(postgres_dsn):
+    """Admin bootstrap applies 002 without constructing EvidenceLedger."""
+    import psycopg
+
+    drop_postgres_scoped_schema(postgres_dsn)
+    with psycopg.connect(postgres_dsn) as conn:
+        conn.execute(load_postgres_migration_sql("001_scoped_ledger_v1.sql"))
+        conn.execute(
+            """
+            INSERT INTO phigraph_schema_migrations (version, checksum)
+            VALUES (%s, %s)
+            """,
+            (SCOPED_LEDGER_MIGRATION_VERSION, postgres_migration_checksum("001_scoped_ledger_v1.sql")),
+        )
+        conn.commit()
+
+    applied = bootstrap_postgres_scoped_schema(postgres_dsn)
+    assert applied == [GATEWAY_EVENTS_MIGRATION_VERSION]
+
+    backend = PostgreSQLLedgerBackend(postgres_dsn, EvidenceLedger.COLLECTIONS)
+    EvidenceLedger(backend=backend)
+    reset_postgres_scoped_schema(postgres_dsn)
+
+
+def test_postgres_engine_rejects_corrupt_migration_checksum(postgres_dsn):
     import psycopg
 
     with psycopg.connect(postgres_dsn) as conn:
-        conn.execute("DROP TABLE IF EXISTS phigraph_scoped_ledger CASCADE")
-        conn.execute("DROP TABLE IF EXISTS phigraph_chain_heads CASCADE")
-        conn.execute("DROP TABLE IF EXISTS phigraph_schema_migrations CASCADE")
+        apply_postgres_migrations(conn)
+        conn.execute(
+            """
+            UPDATE phigraph_schema_migrations
+            SET checksum = %s
+            WHERE version = %s
+            """,
+            ("deadbeef", SCOPED_LEDGER_MIGRATION_VERSION),
+        )
         conn.commit()
-    with pytest.raises(TransactionUnavailable):
+    with pytest.raises(TransactionUnavailable, match="checksum mismatch"):
         backend = PostgreSQLLedgerBackend(postgres_dsn, EvidenceLedger.COLLECTIONS)
         EvidenceLedger(backend=backend)
-    with psycopg.connect(postgres_dsn) as conn:
-        apply_postgres_migrations(conn)
-        conn.commit()
+    _reset_scoped_schema(postgres_dsn)
 
 
 def test_root_migration_002_matches_package_sql() -> None:

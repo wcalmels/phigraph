@@ -25,10 +25,18 @@ PostgreSQL/SQLite/JSON legacy data migrates explicitly before service enablement
 
 ### Upgrade
 
-1. Apply PostgreSQL migrations 001 + 002 (or SQLite auto-migration on first scoped open)
-2. Run `cutover_grdi_scoped_ledger(ledger)` per tenant scope
-3. Verify `verify_scoped_chain()` passes
-4. Deploy GRDI 0.5.0 service (no legacy ledger fallback)
+**PostgreSQL (RC7 → RC8)**
+
+1. **Recommended (out-of-band):** run `bootstrap_postgres_scoped_schema(dsn)` from
+   `phigraph.core_v3.postgres_migrations` before starting the service — applies pending
+   migration 002 without constructing `EvidenceLedger`.
+2. **Automatic:** on first `EvidenceLedger` connect, pending forward migrations (001→002)
+   are applied before schema verification.
+3. Run `cutover_grdi_scoped_ledger(ledger)` per tenant scope.
+4. Verify `verify_scoped_chain()` passes.
+5. Deploy GRDI 0.5.0 service (no legacy ledger fallback).
+
+SQLite applies migration 002 automatically on first scoped open.
 
 See `docs/decisions/ADR-022-grdi-transactional-ledger-refactor.md` and
 `GRDI_TRANSACTIONAL_REFACTOR_CONFORMANCE_REPORT.md`.

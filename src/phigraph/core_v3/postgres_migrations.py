@@ -386,6 +386,21 @@ def ensure_legacy_core_ledger_table(conn: Any) -> None:
     conn.execute(_LEGACY_CORE_LEDGER_DDL)
 
 
+def bootstrap_postgres_scoped_schema(dsn: str) -> list[str]:
+    """Apply pending scoped PostgreSQL migrations without constructing EvidenceLedger.
+
+    Use before first service start on RC7 databases that only have migration 001,
+    or from admin/cutover scripts that must upgrade schema out-of-band.
+    """
+    import psycopg
+
+    with psycopg.connect(dsn) as conn:
+        applied = apply_postgres_migrations(conn)
+        conn.commit()
+        verify_postgres_schema(conn)
+    return applied
+
+
 def drop_postgres_scoped_schema(dsn: str) -> None:
     """Drop scoped tables and migration registry (tests/CI helper)."""
     import psycopg

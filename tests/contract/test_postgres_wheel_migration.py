@@ -22,6 +22,7 @@ from phigraph.core_v3.postgres_migrations import (
     scoped_ledger_migration_checksum,
     verify_postgres_schema,
 )
+from phigraph.core_v3.transactions import TransactionUnavailable
 
 pytest.importorskip("psycopg")
 
@@ -59,16 +60,23 @@ def test_wheel_packages_scoped_migration_sql(built_wheel: Path) -> None:
 
 
 def test_wheel_apply_postgres_migrations(postgres_dsn: str, built_wheel: Path) -> None:
+    """RC7 wheel path: packaged 001 only, then runner applies 002 before verify."""
     import psycopg
+
+    from phigraph.core_v3.postgres_migrations import (
+        GATEWAY_EVENTS_MIGRATION_VERSION,
+        apply_postgres_migrations,
+        postgres_migration_checksum,
+    )
 
     drop_postgres_scoped_schema(postgres_dsn)
     with zipfile.ZipFile(built_wheel) as archive:
         sql = archive.read(
             "phigraph/core_v3/sql/postgresql/001_scoped_ledger_v1.sql"
         ).decode("utf-8")
-    checksum = hashlib.sha256(sql.encode("utf-8")).hexdigest()
+    checksum = hashlib.sha256(normalize_migration_sql(sql).encode("utf-8")).hexdigest()
     with psycopg.connect(postgres_dsn) as conn:
-        conn.execute(sql)
+        conn.execute(normalize_migration_sql(sql))
         conn.execute(
             """
             INSERT INTO phigraph_schema_migrations (version, checksum)
@@ -77,7 +85,12 @@ def test_wheel_apply_postgres_migrations(postgres_dsn: str, built_wheel: Path) -
             (SCOPED_LEDGER_MIGRATION_VERSION, checksum),
         )
         conn.commit()
+        with pytest.raises(TransactionUnavailable, match="002_gateway_decision_events"):
+            verify_postgres_schema(conn)
+        applied = apply_postgres_migrations(conn)
+        conn.commit()
         verify_postgres_schema(conn)
+        assert applied == [GATEWAY_EVENTS_MIGRATION_VERSION]
     reset_postgres_scoped_schema(postgres_dsn)
 
 

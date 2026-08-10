@@ -509,11 +509,7 @@ class EvidenceLedger:
         """Apply pending PostgreSQL scoped schema migrations (admin/cutover)."""
         if not isinstance(self.backend, PostgreSQLLedgerBackend):
             raise TransactionUnavailable("ensure_postgres_scoped_migrations requires PostgreSQL backend")
-        import psycopg
 
-        from .postgres_migrations import apply_postgres_migrations
+        from .postgres_migrations import bootstrap_postgres_scoped_schema
 
-        with psycopg.connect(self.backend.dsn) as conn:
-            applied = apply_postgres_migrations(conn)
-            conn.commit()
-        return applied
+        return bootstrap_postgres_scoped_schema(self.backend.dsn)

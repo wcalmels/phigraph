@@ -7,7 +7,7 @@ from typing import Any, Callable
 
 from .backends import PostgreSQLLedgerBackend
 from .postgres_advisory import acquire_advisory_locks, implicit_write_lock_refs
-from .postgres_migrations import verify_postgres_schema
+from .postgres_migrations import apply_postgres_migrations, verify_postgres_schema
 from .scoped_ledger import (
     _ChainHeadView,
     _ChainRowView,
@@ -56,6 +56,8 @@ class PostgresScopedEngine:
         self._tls = tls_getter
         self._build_row = build_row
         with backend._connect() as conn:
+            apply_postgres_migrations(conn)
+            conn.commit()
             verify_postgres_schema(conn)
 
     def _conn_for_op(self) -> tuple[Any, bool]:
@@ -448,21 +450,38 @@ class PostgresScopedEngine:
             raise ValueError("offset must be non-negative")
         if limit < 1 or limit > MAX_LIST_LIMIT:
             raise ValueError(f"limit must be between 1 and {MAX_LIST_LIMIT}")
-        clauses = ["collection = %s"]
-        params: list[Any] = [collection]
-        if tenant_id is not None:
-            clauses.append("tenant_id = %s")
-            params.append(tenant_id)
-        if project_id is not None:
-            clauses.append("project_id = %s")
-            params.append(project_id)
-        params.extend([limit, offset])
-        query = f"""
-            SELECT payload FROM phigraph_scoped_ledger
-            WHERE {' AND '.join(clauses)}
-            ORDER BY tenant_id, project_id, chain_sequence ASC, record_id ASC
-            LIMIT %s OFFSET %s
-        """
+        if tenant_id is not None and project_id is not None:
+            query = """
+                SELECT payload FROM phigraph_scoped_ledger
+                WHERE collection = %s AND tenant_id = %s AND project_id = %s
+                ORDER BY tenant_id, project_id, chain_sequence ASC, record_id ASC
+                LIMIT %s OFFSET %s
+            """
+            params: list[Any] = [collection, tenant_id, project_id, limit, offset]
+        elif tenant_id is not None:
+            query = """
+                SELECT payload FROM phigraph_scoped_ledger
+                WHERE collection = %s AND tenant_id = %s
+                ORDER BY tenant_id, project_id, chain_sequence ASC, record_id ASC
+                LIMIT %s OFFSET %s
+            """
+            params = [collection, tenant_id, limit, offset]
+        elif project_id is not None:
+            query = """
+                SELECT payload FROM phigraph_scoped_ledger
+                WHERE collection = %s AND project_id = %s
+                ORDER BY tenant_id, project_id, chain_sequence ASC, record_id ASC
+                LIMIT %s OFFSET %s
+            """
+            params = [collection, project_id, limit, offset]
+        else:
+            query = """
+                SELECT payload FROM phigraph_scoped_ledger
+                WHERE collection = %s
+                ORDER BY tenant_id, project_id, chain_sequence ASC, record_id ASC
+                LIMIT %s OFFSET %s
+            """
+            params = [collection, limit, offset]
         tls = self._tls()
         conn = tls.postgres_conn
         close = conn is None

@@ -940,21 +940,38 @@ class ScopedLedgerEngine:
             rows.sort(key=lambda item: (item.tenant_id, item.project_id, item.chain_sequence, item.record_id))
             return [row.to_public() for row in rows[offset:offset + limit]]
         if isinstance(self.backend, SQLiteLedgerBackend):
-            clauses = ["collection=?"]
-            params: list[Any] = [collection]
-            if tenant_id is not None:
-                clauses.append("tenant_id=?")
-                params.append(tenant_id)
-            if project_id is not None:
-                clauses.append("project_id=?")
-                params.append(project_id)
-            params.extend([limit, offset])
-            query = f"""
-                SELECT payload FROM phigraph_scoped_ledger
-                WHERE {' AND '.join(clauses)}
-                ORDER BY tenant_id, project_id, chain_sequence ASC, record_id ASC
-                LIMIT ? OFFSET ?
-            """
+            if tenant_id is not None and project_id is not None:
+                query = """
+                    SELECT payload FROM phigraph_scoped_ledger
+                    WHERE collection=? AND tenant_id=? AND project_id=?
+                    ORDER BY tenant_id, project_id, chain_sequence ASC, record_id ASC
+                    LIMIT ? OFFSET ?
+                """
+                params: list[Any] = [collection, tenant_id, project_id, limit, offset]
+            elif tenant_id is not None:
+                query = """
+                    SELECT payload FROM phigraph_scoped_ledger
+                    WHERE collection=? AND tenant_id=?
+                    ORDER BY tenant_id, project_id, chain_sequence ASC, record_id ASC
+                    LIMIT ? OFFSET ?
+                """
+                params = [collection, tenant_id, limit, offset]
+            elif project_id is not None:
+                query = """
+                    SELECT payload FROM phigraph_scoped_ledger
+                    WHERE collection=? AND project_id=?
+                    ORDER BY tenant_id, project_id, chain_sequence ASC, record_id ASC
+                    LIMIT ? OFFSET ?
+                """
+                params = [collection, project_id, limit, offset]
+            else:
+                query = """
+                    SELECT payload FROM phigraph_scoped_ledger
+                    WHERE collection=?
+                    ORDER BY tenant_id, project_id, chain_sequence ASC, record_id ASC
+                    LIMIT ? OFFSET ?
+                """
+                params = [collection, limit, offset]
             tls = self._tls()
             conn = tls.sqlite_conn
             close = conn is None
