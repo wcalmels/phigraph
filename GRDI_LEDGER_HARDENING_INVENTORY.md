@@ -1,5 +1,25 @@
 # GRDI Ledger Hardening Inventory
 
+**Branch:** `feature/grdi-transactional-ledger-refactor-v1` (post ADR-022)
+**Base:** `main@44ba1cc`
+**Date:** 2026-08-10
+**Scope:** GRDI production ledger access after transactional refactor (Core 4.1.0-rc.8)
+
+## Post-refactor summary
+
+| Metric | Before (rc.7) | After (rc.8) |
+|---|---|---|
+| Forbidden patterns in `src/phigraph/grdi/` | 14 | **0** |
+| GRDI writes via public scoped API | partial | **100%** (service/replay) |
+| Gateway simulation state | mutable on `gateway_decisions` | append-only `gateway_decision_events` |
+| Legacy cutover | partial (scoped migrators) | JSON + SQLite + PostgreSQL + event backfill |
+
+See `GRDI_TRANSACTIONAL_REFACTOR_CONFORMANCE_REPORT.md` and ADR-022.
+
+---
+
+**Historical inventory (pre-refactor):** documentation baseline for ADR-020/021.
+
 **Branch:** `feature/grdi-foundation-1.0-rc`
 **Base:** `main@06df1eb`
 **Date:** 2026-08-08
