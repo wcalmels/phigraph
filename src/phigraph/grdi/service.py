@@ -4,8 +4,19 @@ from typing import Any
 
 from phigraph.core_v3.ledger import EvidenceLedger
 from phigraph.core_v3.service import CoreV3Service
+from phigraph.core_v3.transactions import MAX_LIST_LIMIT, ScopedRecordNotFound
 from phigraph.grdi.authority import AuthorityEngine
+from phigraph.grdi.events import build_gateway_decision_event_record, gateway_event_canonical
 from phigraph.grdi.execution_gateway import ExecutionGateway
+from phigraph.grdi.ledger_ops import (
+    authority_locks,
+    comparison_locks,
+    envelope_locks,
+    execution_plan_locks,
+    outcome_locks,
+    replay_locks,
+    simulation_locks,
+)
 from phigraph.grdi.models import (
     OUTCOME_ORIGIN_SHADOW_SIMULATION,
     Approval,
@@ -27,7 +38,8 @@ from phigraph.grdi.models import (
     action_hash,
 )
 from phigraph.grdi.outcome_ledger import aggregate_outcome_state, validate_effect_assessments
-from phigraph.grdi.replay import ReplayEngine
+from phigraph.grdi.projection import build_plan_projection, project_gateway_state
+from phigraph.grdi.replay import ReplayEngine, comparison_key
 from phigraph.version import GRDI_VERSION
 
 
@@ -39,25 +51,35 @@ class GRDIService:
         self.replay = ReplayEngine(self)
 
     def register_envelope(self, envelope: DecisionEnvelope) -> DecisionEnvelope:
-        self.core.ledger.register_scoped_record(
-            "decision_envelopes",
-            envelope.to_dict(),
-            unique_key="envelope_id",
+        locks = envelope_locks(
+            envelope_id=envelope.envelope_id,
             tenant_id=envelope.tenant_id,
             project_id=envelope.project_id,
         )
-        return envelope
+
+        def _commit(session) -> DecisionEnvelope:
+            session.append_scoped_once(
+                "decision_envelopes",
+                envelope.to_dict(),
+                canonical_key=envelope.envelope_id,
+            )
+            return envelope
+
+        return self.core.ledger.run_scoped_transaction(
+            envelope.tenant_id,
+            envelope.project_id,
+            locks,
+            _commit,
+        )
 
     def get_envelope(self, envelope_id: str, *, tenant_id: str, project_id: str) -> DecisionEnvelope:
-        rows = self.core.ledger.query(
+        row = self._scoped_get(
             "decision_envelopes",
+            canonical_key=envelope_id,
             tenant_id=tenant_id,
             project_id=project_id,
-            limit=100000,
+            error="decision_envelope_not_found_in_scope",
         )
-        row = next((item for item in rows if item["envelope_id"] == envelope_id), None)
-        if row is None:
-            raise KeyError("decision_envelope_not_found_in_scope")
         return self._envelope_from_row(row)
 
     def authorize(
@@ -77,14 +99,23 @@ class GRDIService:
             authority_role=authority_role,
             approvals=approvals,
         )
-        self.core.ledger.register_scoped_record(
-            "authority_decisions",
-            decision.to_dict(),
-            unique_key="authority_decision_id",
+        locks = authority_locks(
+            envelope_id=envelope_id,
+            authority_decision_id=decision.authority_decision_id,
             tenant_id=tenant_id,
             project_id=project_id,
         )
-        return decision
+
+        def _commit(session) -> AuthorityDecision:
+            session.get_scoped("decision_envelopes", canonical_key=envelope_id)
+            session.append_scoped(
+                "authority_decisions",
+                decision.to_dict(),
+                canonical_key=decision.authority_decision_id,
+            )
+            return decision
+
+        return self.core.ledger.run_scoped_transaction(tenant_id, project_id, locks, _commit)
 
     def get_authority_decision(
         self,
@@ -93,15 +124,13 @@ class GRDIService:
         tenant_id: str,
         project_id: str,
     ) -> AuthorityDecision:
-        rows = self.core.ledger.query(
+        row = self._scoped_get(
             "authority_decisions",
+            canonical_key=authority_decision_id,
             tenant_id=tenant_id,
             project_id=project_id,
-            limit=100000,
+            error="authority_decision_not_found_in_scope",
         )
-        row = next((item for item in rows if item["authority_decision_id"] == authority_decision_id), None)
-        if row is None:
-            raise KeyError("authority_decision_not_found_in_scope")
         return self._authority_from_row(row)
 
     def create_execution_plan(
@@ -140,21 +169,49 @@ class GRDIService:
             tenant_id=tenant_id,
             project_id=project_id,
         )
-        self.core.ledger.register_scoped_record(
-            "execution_requests",
-            request.to_dict(),
-            unique_key="plan_id",
+        locks = execution_plan_locks(
+            envelope_id=envelope_id,
+            authority_decision_id=authority_decision_id,
+            plan_id=request.plan_id,
             tenant_id=tenant_id,
             project_id=project_id,
         )
-        self.core.ledger.register_scoped_record(
-            "gateway_decisions",
-            gateway.to_dict(),
-            unique_key="gateway_decision_id",
+        created_event = build_gateway_decision_event_record(
             tenant_id=tenant_id,
             project_id=project_id,
+            plan_id=request.plan_id,
+            gateway_decision_id=gateway.gateway_decision_id,
+            event_type="GATEWAY_DECISION_CREATED",
+            occurred_at=gateway.decided_at,
+            source_record_id=gateway.gateway_decision_id,
         )
-        return self._plan_payload(request, gateway, authority)
+
+        def _commit(session) -> dict[str, Any]:
+            session.get_scoped("decision_envelopes", canonical_key=envelope_id)
+            session.get_scoped("authority_decisions", canonical_key=authority_decision_id)
+            session.append_scoped(
+                "execution_requests",
+                request.to_dict(),
+                canonical_key=request.plan_id,
+            )
+            session.append_scoped(
+                "gateway_decisions",
+                gateway.to_dict(),
+                canonical_key=request.plan_id,
+            )
+            session.append_scoped_once(
+                "gateway_decision_events",
+                created_event,
+                canonical_key=gateway_event_canonical(request.plan_id, "GATEWAY_DECISION_CREATED"),
+            )
+            return self._plan_projection_payload(
+                request,
+                gateway,
+                authority,
+                events=[created_event],
+            )
+
+        return self.core.ledger.run_scoped_transaction(tenant_id, project_id, locks, _commit)
 
     def get_execution_plan(self, plan_id: str, *, tenant_id: str, project_id: str) -> dict[str, Any]:
         request = self._get_execution_request(plan_id, tenant_id=tenant_id, project_id=project_id)
@@ -164,91 +221,98 @@ class GRDIService:
             tenant_id=tenant_id,
             project_id=project_id,
         )
-        payload = self._plan_payload(request, gateway, authority)
+        events = self._list_gateway_events(plan_id, tenant_id=tenant_id, project_id=project_id)
+        shadow_receipt: dict[str, Any] | None
         try:
             receipt = self._load_validated_shadow_receipt(request, tenant_id=tenant_id, project_id=project_id)
-            payload["shadow_receipt"] = receipt.to_dict()
+            shadow_receipt = receipt.to_dict()
         except KeyError:
-            payload["shadow_receipt"] = None
-        return payload
+            shadow_receipt = None
+        return self._plan_projection_payload(
+            request,
+            gateway,
+            authority,
+            events=events,
+            shadow_receipt=shadow_receipt,
+        )
 
     def simulate_execution_plan(self, plan_id: str, *, tenant_id: str, project_id: str) -> dict[str, Any]:
-        with self.core.ledger._lock:
-            request = self._get_execution_request(plan_id, tenant_id=tenant_id, project_id=project_id)
+        request = self._get_execution_request(plan_id, tenant_id=tenant_id, project_id=project_id)
+        locks = simulation_locks(
+            plan_id=plan_id,
+            authority_decision_id=request.authority_decision_id,
+            tenant_id=tenant_id,
+            project_id=project_id,
+        )
+
+        def _commit(session) -> ShadowExecutionReceipt:
             try:
-                receipt = self._load_validated_shadow_receipt(
-                    request,
-                    tenant_id=tenant_id,
-                    project_id=project_id,
-                )
-                return self._simulation_result(
-                    plan_id,
-                    tenant_id=tenant_id,
-                    project_id=project_id,
-                    receipt=receipt,
-                )
-            except KeyError:
+                receipt_row = session.get_scoped("shadow_execution_receipts", canonical_key=plan_id)
+                receipt = self._shadow_receipt_from_row(receipt_row)
+                return self._validate_shadow_receipt(receipt, request)
+            except ScopedRecordNotFound:
                 pass
 
-            envelope = self.get_envelope(request.envelope_id, tenant_id=tenant_id, project_id=project_id)
-            authority = self.get_authority_decision(
-                request.authority_decision_id,
-                tenant_id=tenant_id,
-                project_id=project_id,
+            request_row = session.get_scoped("execution_requests", canonical_key=plan_id)
+            loaded_request = self._execution_request_from_row(request_row)
+            gateway_row = session.get_scoped("gateway_decisions", canonical_key=plan_id)
+            stored_gateway = self._gateway_from_row(gateway_row)
+            authority_row = session.get_scoped(
+                "authority_decisions",
+                canonical_key=loaded_request.authority_decision_id,
             )
+            authority = self._authority_from_row(authority_row)
+            envelope_row = session.get_scoped("decision_envelopes", canonical_key=loaded_request.envelope_id)
+            envelope = self._envelope_from_row(envelope_row)
+
             gateway = self.gateway.evaluate(
                 envelope=envelope,
                 authority=authority,
-                request=request,
+                request=loaded_request,
                 tenant_id=tenant_id,
                 project_id=project_id,
             )
-            stored_gateway = self._get_gateway_decision(plan_id, tenant_id=tenant_id, project_id=project_id)
             if gateway.eligibility is not GatewayEligibilityState.ELIGIBLE_FOR_SHADOW:
-                self._persist_gateway_state(stored_gateway, gateway, tenant_id=tenant_id, project_id=project_id)
                 raise ValueError("plan_not_eligible_for_shadow")
 
             receipt = self.gateway.simulate(
                 envelope=envelope,
                 authority=authority,
-                request=request,
+                request=loaded_request,
                 gateway=gateway,
             )
-            stored_row, created = self.core.ledger.register_scoped_record_once(
+            stored_result = session.append_scoped_once(
                 "shadow_execution_receipts",
                 receipt.to_dict(),
-                unique_key="plan_id",
-                tenant_id=tenant_id,
-                project_id=project_id,
+                canonical_key=plan_id,
             )
-            receipt = self._shadow_receipt_from_row(stored_row)
-            receipt = self._validate_shadow_receipt(receipt, request)
-            if created:
-                self._persist_gateway_state(
-                    stored_gateway,
-                    GatewayDecision(
-                        gateway_decision_id=stored_gateway.gateway_decision_id,
-                        plan_id=stored_gateway.plan_id,
-                        envelope_id=stored_gateway.envelope_id,
-                        authority_decision_id=stored_gateway.authority_decision_id,
-                        eligibility=gateway.eligibility,
-                        reasons=gateway.reasons,
-                        policy_id=gateway.policy_id,
-                        policy_version=gateway.policy_version,
-                        simulation_state=ShadowSimulationState.SIMULATED,
-                        execution_state=ExecutionState.NOT_EXECUTED,
-                        decided_at=stored_gateway.decided_at,
-                        version=stored_gateway.version,
-                    ),
+            receipt = self._shadow_receipt_from_row(stored_result.record)
+            receipt = self._validate_shadow_receipt(receipt, loaded_request)
+            if stored_result.created:
+                simulation_event = build_gateway_decision_event_record(
                     tenant_id=tenant_id,
                     project_id=project_id,
+                    plan_id=plan_id,
+                    gateway_decision_id=stored_gateway.gateway_decision_id,
+                    event_type="SIMULATION_RECORDED",
+                    occurred_at=receipt.simulated_at,
+                    shadow_receipt_id=receipt.receipt_id,
+                    source_record_id=receipt.receipt_id,
                 )
-            return self._simulation_result(
-                plan_id,
-                tenant_id=tenant_id,
-                project_id=project_id,
-                receipt=receipt,
-            )
+                session.append_scoped_once(
+                    "gateway_decision_events",
+                    simulation_event,
+                    canonical_key=gateway_event_canonical(plan_id, "SIMULATION_RECORDED"),
+                )
+            return receipt
+
+        receipt = self.core.ledger.run_scoped_transaction(tenant_id, project_id, locks, _commit)
+        return self._simulation_result(
+            plan_id,
+            tenant_id=tenant_id,
+            project_id=project_id,
+            receipt=receipt,
+        )
 
     def record_shadow_outcome(
         self,
@@ -261,24 +325,32 @@ class GRDIService:
         metrics: dict[str, Any] | None = None,
         limitations: tuple[str, ...] = (),
     ) -> dict[str, Any]:
-        with self.core.ledger._lock:
-            request = self._get_execution_request(plan_id, tenant_id=tenant_id, project_id=project_id)
-            gateway = self._get_gateway_decision(plan_id, tenant_id=tenant_id, project_id=project_id)
-            if gateway.simulation_state is not ShadowSimulationState.SIMULATED:
-                raise ValueError("plan_not_simulated")
-            if gateway.execution_state is not ExecutionState.NOT_EXECUTED:
-                raise ValueError("plan_execution_state_invalid")
+        request = self._get_execution_request(plan_id, tenant_id=tenant_id, project_id=project_id)
+        gateway = self._get_gateway_decision(plan_id, tenant_id=tenant_id, project_id=project_id)
+        events = self._list_gateway_events(plan_id, tenant_id=tenant_id, project_id=project_id)
+        current_state = project_gateway_state(gateway, events)
+        if current_state["simulation_state"] != ShadowSimulationState.SIMULATED.value:
+            raise ValueError("plan_not_simulated")
+        if gateway.execution_state is not ExecutionState.NOT_EXECUTED:
+            raise ValueError("plan_execution_state_invalid")
 
-            receipt = self._load_validated_shadow_receipt(request, tenant_id=tenant_id, project_id=project_id)
+        receipt = self._load_validated_shadow_receipt(request, tenant_id=tenant_id, project_id=project_id)
+        locks = outcome_locks(
+            plan_id=plan_id,
+            shadow_receipt_id=receipt.receipt_id,
+            tenant_id=tenant_id,
+            project_id=project_id,
+        )
+
+        def _commit(session) -> dict[str, Any]:
             try:
-                existing = self._get_shadow_outcome_by_receipt(
-                    receipt.receipt_id,
-                    tenant_id=tenant_id,
-                    project_id=project_id,
+                existing_row = session.get_scoped(
+                    "shadow_outcomes",
+                    canonical_key=receipt.receipt_id,
                 )
-                validated = self._validate_shadow_outcome(existing, request, receipt)
-                return validated.to_dict()
-            except KeyError:
+                existing = self._shadow_outcome_from_row(existing_row)
+                return self._validate_shadow_outcome(existing, request, receipt).to_dict()
+            except ScopedRecordNotFound:
                 pass
 
             validate_effect_assessments(effect_assessments)
@@ -341,16 +413,15 @@ class GRDIService:
                 signed_outcome=signed_outcome,
                 recorded_at=draft.recorded_at,
             )
-            stored_row, _created = self.core.ledger.register_scoped_record_once(
+            stored_result = session.append_scoped_once(
                 "shadow_outcomes",
                 record.to_dict(),
-                unique_key="shadow_receipt_id",
-                tenant_id=tenant_id,
-                project_id=project_id,
+                canonical_key=receipt.receipt_id,
             )
-            stored = self._shadow_outcome_from_row(stored_row)
-            validated = self._validate_shadow_outcome(stored, request, receipt)
-            return validated.to_dict()
+            stored = self._shadow_outcome_from_row(stored_result.record)
+            return self._validate_shadow_outcome(stored, request, receipt).to_dict()
+
+        return self.core.ledger.run_scoped_transaction(tenant_id, project_id, locks, _commit)
 
     def get_shadow_outcome(self, outcome_id: str, *, tenant_id: str, project_id: str) -> dict[str, Any]:
         record = self._get_shadow_outcome(outcome_id, tenant_id=tenant_id, project_id=project_id)
@@ -374,25 +445,39 @@ class GRDIService:
         project_id: str,
         requested_by: str,
     ) -> dict[str, Any]:
-        with self.core.ledger._lock:
-            rows = self.replay._load_chain_rows(plan_id, tenant_id=tenant_id, project_id=project_id)
-            if rows["execution_request"] is None:
-                raise KeyError("execution_plan_not_found_in_scope")
-            report = self.replay.build_report(
-                plan_id,
-                tenant_id=tenant_id,
-                project_id=project_id,
-                requested_by=requested_by,
-            )
-            stored_row, _created = self.core.ledger.register_scoped_record_once(
+        self._get_execution_request(plan_id, tenant_id=tenant_id, project_id=project_id)
+        report = self.replay.build_report(
+            plan_id,
+            tenant_id=tenant_id,
+            project_id=project_id,
+            requested_by=requested_by,
+        )
+        locks = replay_locks(
+            plan_id=plan_id,
+            manifest_hash=report.manifest_hash,
+            tenant_id=tenant_id,
+            project_id=project_id,
+        )
+
+        def _commit(session) -> dict[str, Any]:
+            try:
+                existing = session.get_scoped(
+                    "replay_reports",
+                    canonical_key=report.manifest_hash,
+                )
+                stored = ReplayReport.from_dict(self._strip_scoped_metadata(existing))
+                return self.replay.validate_report(stored, verify_sources=False).to_dict()
+            except ScopedRecordNotFound:
+                pass
+            stored_result = session.append_scoped_once(
                 "replay_reports",
                 report.to_dict(),
-                unique_key="manifest_hash",
-                tenant_id=tenant_id,
-                project_id=project_id,
+                canonical_key=report.manifest_hash,
             )
-            stored = ReplayReport.from_dict(stored_row)
+            stored = ReplayReport.from_dict(self._strip_scoped_metadata(stored_result.record))
             return self.replay.validate_report(stored, verify_sources=False).to_dict()
+
+        return self.core.ledger.run_scoped_transaction(tenant_id, project_id, locks, _commit)
 
     def get_replay_report(self, replay_id: str, *, tenant_id: str, project_id: str) -> dict[str, Any]:
         row = self._get_replay_row(replay_id, tenant_id=tenant_id, project_id=project_id)
@@ -400,12 +485,18 @@ class GRDIService:
         return self.replay.validate_report(report).to_dict()
 
     def list_replays_for_plan(self, plan_id: str, *, tenant_id: str, project_id: str) -> list[dict[str, Any]]:
-        rows = self.core.ledger.query("replay_reports", tenant_id=tenant_id, project_id=project_id, limit=100000)
+        rows = self.core.ledger.list_scoped(
+            "replay_reports",
+            tenant_id=tenant_id,
+            project_id=project_id,
+            limit=MAX_LIST_LIMIT,
+        )
         results: list[dict[str, Any]] = []
         for row in rows:
-            if row.get("plan_id") != plan_id:
+            clean = self._strip_scoped_metadata(row)
+            if clean.get("plan_id") != plan_id:
                 continue
-            report = ReplayReport.from_dict(row)
+            report = ReplayReport.from_dict(clean)
             results.append(self.replay.validate_report(report, verify_sources=True).to_dict())
         return results
 
@@ -418,21 +509,39 @@ class GRDIService:
         project_id: str,
         requested_by: str,
     ) -> dict[str, Any]:
-        with self.core.ledger._lock:
-            baseline_row = self._get_replay_row(baseline_replay_id, tenant_id=tenant_id, project_id=project_id)
-            candidate_row = self._get_replay_row(candidate_replay_id, tenant_id=tenant_id, project_id=project_id)
-            baseline = ReplayReport.from_dict(baseline_row)
-            candidate = ReplayReport.from_dict(candidate_row)
+        baseline_row = self._get_replay_row(baseline_replay_id, tenant_id=tenant_id, project_id=project_id)
+        candidate_row = self._get_replay_row(candidate_replay_id, tenant_id=tenant_id, project_id=project_id)
+        baseline = ReplayReport.from_dict(baseline_row)
+        candidate = ReplayReport.from_dict(candidate_row)
+        key = comparison_key(baseline_replay_id, candidate_replay_id)
+        locks = comparison_locks(
+            baseline_manifest_hash=baseline.manifest_hash,
+            candidate_manifest_hash=candidate.manifest_hash,
+            comparison_key=key,
+            tenant_id=tenant_id,
+            project_id=project_id,
+        )
+
+        def _commit(session) -> dict[str, Any]:
             comparison = self.replay.compare_reports(baseline, candidate, requested_by=requested_by)
-            stored_row, _created = self.core.ledger.register_scoped_record_once(
+            try:
+                existing = session.get_scoped(
+                    "historical_comparisons",
+                    canonical_key=comparison.comparison_key,
+                )
+                stored = HistoricalComparison.from_dict(self._strip_scoped_metadata(existing))
+                return self.replay.validate_comparison(stored).to_dict()
+            except ScopedRecordNotFound:
+                pass
+            stored_result = session.append_scoped_once(
                 "historical_comparisons",
                 comparison.to_dict(),
-                unique_key="comparison_key",
-                tenant_id=tenant_id,
-                project_id=project_id,
+                canonical_key=comparison.comparison_key,
             )
-            stored = HistoricalComparison.from_dict(stored_row)
+            stored = HistoricalComparison.from_dict(self._strip_scoped_metadata(stored_result.record))
             return self.replay.validate_comparison(stored).to_dict()
+
+        return self.core.ledger.run_scoped_transaction(tenant_id, project_id, locks, _commit)
 
     def get_historical_comparison(
         self,
@@ -441,24 +550,94 @@ class GRDIService:
         tenant_id: str,
         project_id: str,
     ) -> dict[str, Any]:
-        rows = self.core.ledger.query(
+        rows = self.core.ledger.list_scoped(
             "historical_comparisons",
             tenant_id=tenant_id,
             project_id=project_id,
-            limit=100000,
+            limit=MAX_LIST_LIMIT,
         )
-        row = next((item for item in rows if item["comparison_id"] == comparison_id), None)
+        row = next(
+            (self._strip_scoped_metadata(item) for item in rows if item.get("comparison_id") == comparison_id),
+            None,
+        )
         if row is None:
             raise KeyError("historical_comparison_not_found_in_scope")
         comparison = HistoricalComparison.from_dict(row)
         return self.replay.validate_comparison(comparison).to_dict()
 
+    def _list_gateway_events(
+        self,
+        plan_id: str,
+        *,
+        tenant_id: str,
+        project_id: str,
+    ) -> list[dict[str, Any]]:
+        rows = self.core.ledger.list_scoped(
+            "gateway_decision_events",
+            tenant_id=tenant_id,
+            project_id=project_id,
+            limit=MAX_LIST_LIMIT,
+        )
+        return [
+            self._strip_scoped_metadata(row)
+            for row in rows
+            if row.get("plan_id") == plan_id
+        ]
+
+    def _plan_projection_payload(
+        self,
+        request: ExecutionRequest,
+        gateway: GatewayDecision,
+        authority: AuthorityDecision,
+        *,
+        events: list[dict[str, Any]],
+        shadow_receipt: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        return build_plan_projection(
+            request=self._strip_scoped_metadata(request.to_dict()),
+            signed_gateway=gateway,
+            authority=self._strip_scoped_metadata(authority.to_dict()),
+            events=events,
+            shadow_receipt=shadow_receipt,
+        )
+
+    def _scoped_get(
+        self,
+        collection: str,
+        *,
+        canonical_key: str,
+        tenant_id: str,
+        project_id: str,
+        error: str,
+    ) -> dict[str, Any]:
+        try:
+            return self.core.ledger.get_scoped(
+                collection,
+                canonical_key=canonical_key,
+                tenant_id=tenant_id,
+                project_id=project_id,
+            )
+        except ScopedRecordNotFound as exc:
+            raise KeyError(error) from exc
+
     def _get_replay_row(self, replay_id: str, *, tenant_id: str, project_id: str) -> dict[str, Any]:
-        rows = self.core.ledger.query("replay_reports", tenant_id=tenant_id, project_id=project_id, limit=100000)
-        row = next((item for item in rows if item["replay_id"] == replay_id), None)
+        rows = self.core.ledger.list_scoped(
+            "replay_reports",
+            tenant_id=tenant_id,
+            project_id=project_id,
+            limit=MAX_LIST_LIMIT,
+        )
+        row = next(
+            (self._strip_scoped_metadata(item) for item in rows if item.get("replay_id") == replay_id),
+            None,
+        )
         if row is None:
             raise KeyError("replay_report_not_found_in_scope")
         return row
+
+    @staticmethod
+    def _strip_scoped_metadata(row: dict[str, Any]) -> dict[str, Any]:
+        return {key: value for key, value in row.items() if key not in {"_chain", "scope"}}
 
     @staticmethod
     def _source_receipt_hash(receipt: ShadowExecutionReceipt) -> str:
@@ -566,25 +745,31 @@ class GRDIService:
         return record
 
     def _get_shadow_outcome(self, outcome_id: str, *, tenant_id: str, project_id: str) -> ShadowOutcomeRecord:
-        rows = self.core.ledger.query(
+        rows = self.core.ledger.list_scoped(
             "shadow_outcomes",
             tenant_id=tenant_id,
             project_id=project_id,
-            limit=100000,
+            limit=MAX_LIST_LIMIT,
         )
-        row = next((item for item in rows if item["outcome_id"] == outcome_id), None)
+        row = next(
+            (self._strip_scoped_metadata(item) for item in rows if item.get("outcome_id") == outcome_id),
+            None,
+        )
         if row is None:
             raise KeyError("shadow_outcome_not_found_in_scope")
         return self._shadow_outcome_from_row(row)
 
     def _get_shadow_outcome_by_plan(self, plan_id: str, *, tenant_id: str, project_id: str) -> ShadowOutcomeRecord:
-        rows = self.core.ledger.query(
+        rows = self.core.ledger.list_scoped(
             "shadow_outcomes",
             tenant_id=tenant_id,
             project_id=project_id,
-            limit=100000,
+            limit=MAX_LIST_LIMIT,
         )
-        row = next((item for item in rows if item["plan_id"] == plan_id), None)
+        row = next(
+            (self._strip_scoped_metadata(item) for item in rows if item.get("plan_id") == plan_id),
+            None,
+        )
         if row is None:
             raise KeyError("shadow_outcome_not_found_in_scope")
         return self._shadow_outcome_from_row(row)
@@ -596,39 +781,19 @@ class GRDIService:
         tenant_id: str,
         project_id: str,
     ) -> ShadowOutcomeRecord:
-        rows = self.core.ledger.query(
+        row = self._scoped_get(
             "shadow_outcomes",
+            canonical_key=shadow_receipt_id,
             tenant_id=tenant_id,
             project_id=project_id,
-            limit=100000,
+            error="shadow_outcome_not_found_in_scope",
         )
-        row = next((item for item in rows if item["shadow_receipt_id"] == shadow_receipt_id), None)
-        if row is None:
-            raise KeyError("shadow_outcome_not_found_in_scope")
         return self._shadow_outcome_from_row(row)
 
     @staticmethod
     def _shadow_outcome_from_row(row: dict[str, Any]) -> ShadowOutcomeRecord:
-        return ShadowOutcomeRecord.from_dict(row)
-
-    @staticmethod
-    def _plan_payload(
-        request: ExecutionRequest,
-        gateway: GatewayDecision,
-        authority: AuthorityDecision,
-    ) -> dict[str, Any]:
-        return {
-            "plan_id": request.plan_id,
-            "execution_request": request.to_dict(),
-            "gateway_decision": gateway.to_dict(),
-            "flow_state": {
-                "verification": authority.verification_state.value,
-                "authorization": authority.authorization_state.value,
-                "gateway_eligibility": gateway.eligibility.value,
-                "simulation": gateway.simulation_state.value,
-                "execution": gateway.execution_state.value,
-            },
-        }
+        clean = {key: value for key, value in row.items() if key not in {"_chain", "scope"}}
+        return ShadowOutcomeRecord.from_dict(clean)
 
     def _simulation_result(
         self,
@@ -642,36 +807,6 @@ class GRDIService:
             "plan": self.get_execution_plan(plan_id, tenant_id=tenant_id, project_id=project_id),
             "shadow_receipt": receipt.to_dict(),
         }
-
-    def _persist_gateway_state(
-        self,
-        stored_gateway: GatewayDecision,
-        gateway: GatewayDecision,
-        *,
-        tenant_id: str,
-        project_id: str,
-    ) -> None:
-        updated = GatewayDecision(
-            gateway_decision_id=stored_gateway.gateway_decision_id,
-            plan_id=stored_gateway.plan_id,
-            envelope_id=stored_gateway.envelope_id,
-            authority_decision_id=stored_gateway.authority_decision_id,
-            eligibility=gateway.eligibility,
-            reasons=gateway.reasons,
-            policy_id=gateway.policy_id,
-            policy_version=gateway.policy_version,
-            simulation_state=gateway.simulation_state,
-            execution_state=gateway.execution_state,
-            decided_at=stored_gateway.decided_at,
-            version=stored_gateway.version,
-        )
-        self.core.ledger.update_scoped_record(
-            "gateway_decisions",
-            updated.to_dict(),
-            unique_key="gateway_decision_id",
-            tenant_id=tenant_id,
-            project_id=project_id,
-        )
 
     def _load_validated_shadow_receipt(
         self,
@@ -718,39 +853,33 @@ class GRDIService:
         return receipt
 
     def _get_execution_request(self, plan_id: str, *, tenant_id: str, project_id: str) -> ExecutionRequest:
-        rows = self.core.ledger.query(
+        row = self._scoped_get(
             "execution_requests",
+            canonical_key=plan_id,
             tenant_id=tenant_id,
             project_id=project_id,
-            limit=100000,
+            error="execution_plan_not_found_in_scope",
         )
-        row = next((item for item in rows if item["plan_id"] == plan_id), None)
-        if row is None:
-            raise KeyError("execution_plan_not_found_in_scope")
         return self._execution_request_from_row(row)
 
     def _get_gateway_decision(self, plan_id: str, *, tenant_id: str, project_id: str) -> GatewayDecision:
-        rows = self.core.ledger.query(
+        row = self._scoped_get(
             "gateway_decisions",
+            canonical_key=plan_id,
             tenant_id=tenant_id,
             project_id=project_id,
-            limit=100000,
+            error="gateway_decision_not_found_in_scope",
         )
-        row = next((item for item in rows if item["plan_id"] == plan_id), None)
-        if row is None:
-            raise KeyError("gateway_decision_not_found_in_scope")
         return self._gateway_from_row(row)
 
     def _get_shadow_receipt(self, plan_id: str, *, tenant_id: str, project_id: str) -> ShadowExecutionReceipt:
-        rows = self.core.ledger.query(
+        row = self._scoped_get(
             "shadow_execution_receipts",
+            canonical_key=plan_id,
             tenant_id=tenant_id,
             project_id=project_id,
-            limit=100000,
+            error="shadow_receipt_not_found_in_scope",
         )
-        row = next((item for item in rows if item["plan_id"] == plan_id), None)
-        if row is None:
-            raise KeyError("shadow_receipt_not_found_in_scope")
         return self._shadow_receipt_from_row(row)
 
     @staticmethod

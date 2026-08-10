@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Any
 
 from phigraph.core_v3.ledger import EvidenceLedger
+from phigraph.core_v3.transactions import LedgerIntegrityError, MAX_LIST_LIMIT
 from phigraph.grdi.models import (
     ComparisonState,
     ExecutionState,
@@ -103,7 +104,13 @@ class ReplayEngine:
         validation_results: list[dict[str, Any]] = []
         drift_reasons: list[str] = []
         rows = self._load_chain_rows(plan_id, tenant_id=tenant_id, project_id=project_id)
-        chain = self.core.ledger.verify_chain()
+        try:
+            chain = self.core.ledger.verify_scoped_chain(
+                tenant_id=tenant_id,
+                project_id=project_id,
+            )
+        except LedgerIntegrityError as exc:
+            chain = {"valid": False, "reason": str(exc)}
         if not chain.get("valid"):
             validation_results.append(
                 {
@@ -193,13 +200,21 @@ class ReplayEngine:
             if expected != current:
                 drifts.append(f"source_hash_mismatch:{label}")
 
-        chain = self.core.ledger.verify_chain()
+        try:
+            chain = self.core.ledger.verify_scoped_chain(
+                tenant_id=report.tenant_id,
+                project_id=report.project_id,
+            )
+        except LedgerIntegrityError as exc:
+            drifts.append(f"source_chain_invalid:{exc}")
+            return drifts
         if not chain.get("valid"):
             drifts.append(f"source_chain_invalid:{chain.get('reason')}:{chain.get('collection')}")
         else:
             heads = chain.get("heads", {})
             for collection, head in report.manifest.source_chain_heads.items():
-                if head != heads.get(collection):
+                current_head = heads.get(f"{report.tenant_id}/{report.project_id}/{collection}")
+                if head != current_head:
                     drifts.append(f"chain_head_changed:{collection}")
 
         envelope = rows.get("decision_envelope")
@@ -445,7 +460,27 @@ class ReplayEngine:
         *,
         required: bool = True,
     ) -> dict[str, Any] | None:
-        matches = self.core.ledger.query(collection, tenant_id=tenant_id, project_id=project_id, limit=100000)
+        from phigraph.core_v3.transactions import LEGACY_CANONICAL_KEY_FIELDS, ScopedRecordNotFound
+
+        canonical_field = LEGACY_CANONICAL_KEY_FIELDS.get(collection)
+        if canonical_field is not None and key == canonical_field:
+            try:
+                return self.core.ledger.get_scoped(
+                    collection,
+                    canonical_key=value,
+                    tenant_id=tenant_id,
+                    project_id=project_id,
+                )
+            except ScopedRecordNotFound:
+                if required:
+                    raise KeyError(f"{collection}_not_found_in_scope") from None
+                return None
+        matches = self.core.ledger.list_scoped(
+            collection,
+            tenant_id=tenant_id,
+            project_id=project_id,
+            limit=MAX_LIST_LIMIT,
+        )
         row = next((item for item in matches if item.get(key) == value), None)
         if row is None and required:
             raise KeyError(f"{collection}_not_found_in_scope")
@@ -553,7 +588,7 @@ class ReplayEngine:
         }
         heads = chain.get("heads", {})
         source_chain_heads = {
-            collection: heads.get(collection)
+            collection: heads.get(f"{tenant_id}/{project_id}/{collection}")
             for collection in GRDI_CHAIN_COLLECTIONS
         }
         decision_identity = self._extract_decision_identity(envelope) if envelope else {
@@ -652,7 +687,12 @@ class ReplayEngine:
         return prior_valid, skipped
 
     def _list_prior_reports(self, plan_id: str, *, tenant_id: str, project_id: str) -> list[dict[str, Any]]:
-        rows = self.core.ledger.query("replay_reports", tenant_id=tenant_id, project_id=project_id, limit=100000)
+        rows = self.core.ledger.list_scoped(
+            "replay_reports",
+            tenant_id=tenant_id,
+            project_id=project_id,
+            limit=MAX_LIST_LIMIT,
+        )
         return [row for row in rows if row.get("plan_id") == plan_id]
 
     def _compare_pair(
