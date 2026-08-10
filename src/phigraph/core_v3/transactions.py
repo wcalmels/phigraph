@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import Any
 
-TRANSACTIONAL_LEDGER_PROTOCOL_VERSION = "0.1.0"
+TRANSACTIONAL_LEDGER_PROTOCOL_VERSION = "0.2.0"
 
 MAX_LIST_LIMIT = 1000
 

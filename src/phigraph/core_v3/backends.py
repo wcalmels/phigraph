@@ -91,19 +91,7 @@ class PostgreSQLLedgerBackend(LedgerBackend):
             raise RuntimeError("PostgreSQL backend requires optional dependency 'psycopg[binary]'") from exc
         self._psycopg = psycopg
         with self._connect() as conn:
-            conn.execute("""
-                CREATE TABLE IF NOT EXISTS phigraph_core_ledger (
-                    collection TEXT NOT NULL,
-                    record_id TEXT NOT NULL,
-                    payload JSONB NOT NULL,
-                    tenant_id TEXT NOT NULL DEFAULT 'default',
-                    project_id TEXT NOT NULL DEFAULT 'default',
-                    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-                    PRIMARY KEY(collection, record_id)
-                )
-            """)
-            conn.execute("CREATE INDEX IF NOT EXISTS idx_phigraph_core_scope ON phigraph_core_ledger(tenant_id, project_id, collection)")
-            conn.commit()
+            conn.execute("SELECT 1")
 
     def _connect(self):
         return self._psycopg.connect(self.dsn)
