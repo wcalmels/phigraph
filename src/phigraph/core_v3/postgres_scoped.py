@@ -7,7 +7,7 @@ from typing import Any, Callable
 
 from .backends import PostgreSQLLedgerBackend
 from .postgres_advisory import acquire_advisory_locks, implicit_write_lock_refs
-from .postgres_migrations import apply_postgres_migrations, verify_postgres_schema
+from .postgres_migrations import apply_postgres_migrations
 from .scoped_ledger import (
     _ChainHeadView,
     _ChainRowView,
@@ -58,7 +58,6 @@ class PostgresScopedEngine:
         with backend._connect() as conn:
             apply_postgres_migrations(conn)
             conn.commit()
-            verify_postgres_schema(conn)
 
     def _conn_for_op(self) -> tuple[Any, bool]:
         tls = self._tls()

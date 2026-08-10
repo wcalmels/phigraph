@@ -31,7 +31,8 @@ PostgreSQL/SQLite/JSON legacy data migrates explicitly before service enablement
    `phigraph.core_v3.postgres_migrations` before starting the service — applies pending
    migration 002 without constructing `EvidenceLedger`.
 2. **Automatic:** on first `EvidenceLedger` connect, pending forward migrations (001→002)
-   are applied before schema verification.
+   are applied under a cluster-wide `pg_advisory_xact_lock` before schema verification
+   in the same transaction.
 3. Run `cutover_grdi_scoped_ledger(ledger)` per tenant scope.
 4. Verify `verify_scoped_chain()` passes.
 5. Deploy GRDI 0.5.0 service (no legacy ledger fallback).

@@ -33,7 +33,6 @@ def main() -> int:
     with psycopg.connect(dsn) as conn:
         applied = apply_postgres_migrations(conn)
         conn.commit()
-        verify_postgres_schema(conn)
 
     print(len(applied))
     return 0

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import multiprocessing as mp
 from pathlib import Path
 
 import pytest
@@ -29,6 +30,22 @@ pytest.importorskip("psycopg")
 
 def _reset_scoped_schema(postgres_dsn: str) -> None:
     reset_postgres_scoped_schema(postgres_dsn)
+
+
+def _seed_rc7_schema_only(postgres_dsn: str) -> None:
+    import psycopg
+
+    drop_postgres_scoped_schema(postgres_dsn)
+    with psycopg.connect(postgres_dsn) as conn:
+        conn.execute(load_postgres_migration_sql("001_scoped_ledger_v1.sql"))
+        conn.execute(
+            """
+            INSERT INTO phigraph_schema_migrations (version, checksum)
+            VALUES (%s, %s)
+            """,
+            (SCOPED_LEDGER_MIGRATION_VERSION, postgres_migration_checksum("001_scoped_ledger_v1.sql")),
+        )
+        conn.commit()
 
 
 def test_root_migration_matches_package_sql() -> None:
@@ -350,3 +367,115 @@ def test_verify_schema_missing_gateway_events_in_index(postgres_dsn):
         with pytest.raises(TransactionUnavailable, match="gateway_decision_events"):
             verify_postgres_schema(conn)
     _reset_scoped_schema(postgres_dsn)
+
+
+def _concurrent_rc7_upgrade_worker(
+    dsn: str,
+    barrier: mp.Barrier,
+    queue: mp.Queue,
+) -> None:
+    from phigraph.core_v3.postgres_migrations import bootstrap_postgres_scoped_schema
+
+    barrier.wait()
+    try:
+        applied = bootstrap_postgres_scoped_schema(dsn)
+        queue.put(("ok", applied))
+    except Exception as exc:  # pragma: no cover
+        queue.put(("error", repr(exc)))
+
+
+def test_concurrent_rc7_migration_upgrade(postgres_dsn):
+    """Two nodes starting from 001-only schema both succeed with a single 002 row."""
+    import psycopg
+
+    _seed_rc7_schema_only(postgres_dsn)
+    barrier = mp.Barrier(2)
+    queue: mp.Queue = mp.Queue()
+    workers = [
+        mp.Process(
+            target=_concurrent_rc7_upgrade_worker,
+            args=(postgres_dsn, barrier, queue),
+        )
+        for _ in range(2)
+    ]
+    for worker in workers:
+        worker.start()
+    for worker in workers:
+        worker.join(timeout=60)
+        assert worker.exitcode == 0
+
+    results = [queue.get(timeout=10) for _ in workers]
+    assert all(item[0] == "ok" for item in results)
+    applied_sets = sorted(item[1] for item in results)
+    assert applied_sets == [[], [GATEWAY_EVENTS_MIGRATION_VERSION]]
+
+    with psycopg.connect(postgres_dsn) as conn:
+        rows = conn.execute(
+            """
+            SELECT version, checksum FROM phigraph_schema_migrations
+            WHERE version = %s
+            """,
+            (GATEWAY_EVENTS_MIGRATION_VERSION,),
+        ).fetchall()
+        assert len(rows) == 1
+        assert rows[0][1] == gateway_events_migration_checksum()
+        verify_postgres_schema(conn)
+        predicate = conn.execute(
+            """
+            SELECT pg_get_expr(idx.indpred, idx.indrelid)
+            FROM pg_class rel
+            JOIN pg_namespace nsp ON nsp.oid = rel.relnamespace
+            JOIN pg_index idx ON idx.indrelid = rel.oid
+            JOIN pg_class ic ON ic.oid = idx.indexrelid
+            WHERE nsp.nspname = 'public'
+              AND rel.relname = 'phigraph_scoped_ledger'
+              AND ic.relname = 'uq_scoped_chain_sequence_linked'
+            """
+        ).fetchone()
+        assert predicate is not None
+        assert "gateway_decision_events" in predicate[0]
+
+    reset_postgres_scoped_schema(postgres_dsn)
+
+
+def test_migration_verify_failure_rolls_back(postgres_dsn, monkeypatch):
+    """Structural verify failure during migration rolls back DDL and registry writes."""
+    import psycopg
+
+    from phigraph.core_v3 import postgres_migrations as pm
+
+    _seed_rc7_schema_only(postgres_dsn)
+    original_verify = pm.verify_postgres_schema
+
+    def fail_when_002_registered(conn) -> None:
+        if pm._migration_checksum_row(conn, GATEWAY_EVENTS_MIGRATION_VERSION) is not None:
+            raise TransactionUnavailable("simulated structural verify failure")
+        original_verify(conn)
+
+    monkeypatch.setattr(pm, "verify_postgres_schema", fail_when_002_registered)
+
+    with psycopg.connect(postgres_dsn) as conn:
+        with pytest.raises(TransactionUnavailable, match="simulated structural verify failure"):
+            pm.apply_postgres_migrations(conn)
+        conn.rollback()
+
+    with psycopg.connect(postgres_dsn) as conn:
+        assert pm._migration_checksum_row(conn, GATEWAY_EVENTS_MIGRATION_VERSION) is None
+        with pytest.raises(TransactionUnavailable, match="002_gateway_decision_events"):
+            pm.verify_postgres_schema(conn)
+        predicate = conn.execute(
+            """
+            SELECT pg_get_expr(idx.indpred, idx.indrelid)
+            FROM pg_class rel
+            JOIN pg_namespace nsp ON nsp.oid = rel.relnamespace
+            JOIN pg_index idx ON idx.indrelid = rel.oid
+            JOIN pg_class ic ON ic.oid = idx.indexrelid
+            WHERE nsp.nspname = 'public'
+              AND rel.relname = 'phigraph_scoped_ledger'
+              AND ic.relname = 'uq_scoped_chain_sequence_linked'
+            """
+        ).fetchone()
+        assert predicate is not None
+        assert "gateway_decision_events" not in predicate[0]
+
+    reset_postgres_scoped_schema(postgres_dsn)

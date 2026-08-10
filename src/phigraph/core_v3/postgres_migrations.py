@@ -90,6 +90,13 @@ _PARTIAL_CHAIN_INDEX_NAME = "uq_scoped_chain_sequence_linked"
 
 _CHAIN_LINKED_COLLECTIONS = tuple(sorted(CHAIN_LINKED_COLLECTIONS))
 
+# Cluster-wide migration lock for pg_advisory_xact_lock(int, int).
+# Namespace: phigraph:scoped-migration:v1 — do not reuse for scoped write LockRefs.
+_MIGRATION_LOCK_NAMESPACE = "phigraph:scoped-migration:v1"
+_migration_lock_digest = hashlib.sha256(_MIGRATION_LOCK_NAMESPACE.encode("utf-8")).digest()
+MIGRATION_ADVISORY_LOCK_KEY1 = int.from_bytes(_migration_lock_digest[0:4], "big", signed=True)
+MIGRATION_ADVISORY_LOCK_KEY2 = int.from_bytes(_migration_lock_digest[4:8], "big", signed=True)
+
 
 def normalize_migration_sql(text: str) -> str:
     """Normalize migration SQL to LF newlines for stable cross-platform checksums."""
@@ -289,8 +296,22 @@ def _migration_checksum_row(conn: Any, version: str) -> str | None:
     return row[0]
 
 
-def apply_postgres_migrations(conn: Any) -> list[str]:
-    """Apply pending forward migrations in order. Returns applied version ids."""
+def _acquire_migration_advisory_lock(conn: Any) -> None:
+    """Serialize scoped schema migrations across concurrent startup nodes."""
+    conn.execute(
+        "SELECT pg_advisory_xact_lock(%s, %s)",
+        (MIGRATION_ADVISORY_LOCK_KEY1, MIGRATION_ADVISORY_LOCK_KEY2),
+    )
+
+
+def apply_postgres_migrations(conn: Any, *, verify: bool = True) -> list[str]:
+    """Apply pending forward migrations in order. Returns applied version ids.
+
+    Acquires a transaction-scoped advisory lock, re-reads migration state after
+    locking, applies pending migrations, optionally verifies schema, and leaves
+    commit/rollback to the caller so apply+verify stay atomic.
+    """
+    _acquire_migration_advisory_lock(conn)
     applied: list[str] = []
     for version, filename in ORDERED_POSTGRES_MIGRATIONS:
         expected_checksum = postgres_migration_checksum(filename)
@@ -314,6 +335,8 @@ def apply_postgres_migrations(conn: Any) -> list[str]:
             (version, expected_checksum),
         )
         applied.append(version)
+    if verify:
+        verify_postgres_schema(conn)
     return applied
 
 
@@ -397,7 +420,6 @@ def bootstrap_postgres_scoped_schema(dsn: str) -> list[str]:
     with psycopg.connect(dsn) as conn:
         applied = apply_postgres_migrations(conn)
         conn.commit()
-        verify_postgres_schema(conn)
     return applied
 
 
