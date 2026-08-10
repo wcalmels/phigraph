@@ -9,6 +9,7 @@ from phigraph.core_v3.ledger import EvidenceLedger
 from phigraph.core_v3.postgres_migrations import (
     SCOPED_LEDGER_MIGRATION_VERSION,
     apply_postgres_migrations,
+    drop_postgres_scoped_schema,
     load_scoped_ledger_migration_sql,
     reset_postgres_scoped_schema,
     verify_postgres_schema,
@@ -36,7 +37,7 @@ def test_root_migration_matches_package_sql() -> None:
 def test_apply_migrations_idempotent(postgres_dsn):
     import psycopg
 
-    reset_postgres_scoped_schema(postgres_dsn)
+    drop_postgres_scoped_schema(postgres_dsn)
     with psycopg.connect(postgres_dsn) as conn:
         first = apply_postgres_migrations(conn)
         conn.commit()
@@ -44,6 +45,7 @@ def test_apply_migrations_idempotent(postgres_dsn):
         second = apply_postgres_migrations(conn)
         assert first == [SCOPED_LEDGER_MIGRATION_VERSION]
         assert second == []
+    reset_postgres_scoped_schema(postgres_dsn)
 
 
 def test_verify_schema_before_migration(postgres_dsn):

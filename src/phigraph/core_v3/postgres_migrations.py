@@ -282,8 +282,8 @@ def ensure_legacy_core_ledger_table(conn: Any) -> None:
     conn.execute(_LEGACY_CORE_LEDGER_DDL)
 
 
-def reset_postgres_scoped_schema(dsn: str) -> None:
-    """Drop scoped tables and re-apply migrations (tests/CI helper)."""
+def drop_postgres_scoped_schema(dsn: str) -> None:
+    """Drop scoped tables and migration registry (tests/CI helper)."""
     import psycopg
 
     with psycopg.connect(dsn) as conn:
@@ -291,5 +291,13 @@ def reset_postgres_scoped_schema(dsn: str) -> None:
         conn.execute("DROP TABLE IF EXISTS phigraph_chain_heads CASCADE")
         conn.execute("DROP TABLE IF EXISTS phigraph_schema_migrations CASCADE")
         conn.commit()
+
+
+def reset_postgres_scoped_schema(dsn: str) -> None:
+    """Drop scoped tables and re-apply migrations (tests/CI helper)."""
+    import psycopg
+
+    drop_postgres_scoped_schema(dsn)
+    with psycopg.connect(dsn) as conn:
         apply_postgres_migrations(conn)
         conn.commit()

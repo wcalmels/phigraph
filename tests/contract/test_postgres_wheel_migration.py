@@ -25,9 +25,9 @@ def built_wheel(tmp_path_factory) -> Path:
 
 
 def test_wheel_migration_sql_applies_on_postgres(built_wheel, postgres_dsn):
-    from phigraph.core_v3.postgres_migrations import reset_postgres_scoped_schema
+    from phigraph.core_v3.postgres_migrations import drop_postgres_scoped_schema, reset_postgres_scoped_schema
 
-    reset_postgres_scoped_schema(postgres_dsn)
+    drop_postgres_scoped_schema(postgres_dsn)
 
     reset_postgres_scoped_schema(postgres_dsn)
     venv_dir = Path(built_wheel).parent / "wheel-venv"
