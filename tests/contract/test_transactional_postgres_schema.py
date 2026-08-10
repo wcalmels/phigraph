@@ -18,15 +18,9 @@ pytest.importorskip("psycopg")
 
 
 def _reset_scoped_schema(postgres_dsn: str) -> None:
-    import psycopg
+    from tests.contract.conftest import reset_postgres_scoped_schema
 
-    with psycopg.connect(postgres_dsn) as conn:
-        conn.execute("DROP TABLE IF EXISTS phigraph_scoped_ledger CASCADE")
-        conn.execute("DROP TABLE IF EXISTS phigraph_chain_heads CASCADE")
-        conn.execute("DROP TABLE IF EXISTS phigraph_schema_migrations CASCADE")
-        conn.commit()
-        apply_postgres_migrations(conn)
-        conn.commit()
+    reset_postgres_scoped_schema(postgres_dsn)
 
 
 def test_root_migration_matches_package_sql() -> None:
@@ -43,12 +37,15 @@ def test_root_migration_matches_package_sql() -> None:
 def test_apply_migrations_idempotent(postgres_dsn):
     import psycopg
 
+    from tests.contract.conftest import reset_postgres_scoped_schema
+
+    reset_postgres_scoped_schema(postgres_dsn)
     with psycopg.connect(postgres_dsn) as conn:
         first = apply_postgres_migrations(conn)
         conn.commit()
         verify_postgres_schema(conn)
         second = apply_postgres_migrations(conn)
-        assert SCOPED_LEDGER_MIGRATION_VERSION in first
+        assert first == [SCOPED_LEDGER_MIGRATION_VERSION]
         assert second == []
 
 

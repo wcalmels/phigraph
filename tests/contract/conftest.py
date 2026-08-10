@@ -81,3 +81,18 @@ def postgres_ledger(postgres_dsn):
             """
         )
         conn.commit()
+
+
+def reset_postgres_scoped_schema(postgres_dsn: str) -> None:
+    """Drop and re-apply scoped schema (PostgreSQL contract tests)."""
+    import psycopg
+
+    from phigraph.core_v3.postgres_migrations import apply_postgres_migrations
+
+    with psycopg.connect(postgres_dsn) as conn:
+        conn.execute("DROP TABLE IF EXISTS phigraph_scoped_ledger CASCADE")
+        conn.execute("DROP TABLE IF EXISTS phigraph_chain_heads CASCADE")
+        conn.execute("DROP TABLE IF EXISTS phigraph_schema_migrations CASCADE")
+        conn.commit()
+        apply_postgres_migrations(conn)
+        conn.commit()

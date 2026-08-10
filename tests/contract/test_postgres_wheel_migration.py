@@ -25,10 +25,9 @@ def built_wheel(tmp_path_factory) -> Path:
 
 
 def test_wheel_migration_sql_applies_on_postgres(built_wheel, postgres_dsn):
-    import psycopg
+    from tests.contract.conftest import reset_postgres_scoped_schema
 
-    from phigraph.core_v3.postgres_migrations import apply_postgres_migrations
-
+    reset_postgres_scoped_schema(postgres_dsn)
     venv_dir = Path(built_wheel).parent / "wheel-venv"
     subprocess.run([sys.executable, "-m", "venv", str(venv_dir)], check=True)
     pip = venv_dir / ("Scripts" if sys.platform == "win32" else "bin") / "pip"
@@ -50,16 +49,12 @@ def test_wheel_migration_sql_applies_on_postgres(built_wheel, postgres_dsn):
     )
     result = subprocess.run(
         [str(python), "-c", script],
-        check=True,
+        check=False,
         capture_output=True,
         text=True,
         env=env,
     )
-    assert result.stdout.strip() in {"1", "0"}
-    with psycopg.connect(postgres_dsn) as conn:
-        conn.execute("DROP TABLE IF EXISTS phigraph_scoped_ledger CASCADE")
-        conn.execute("DROP TABLE IF EXISTS phigraph_chain_heads CASCADE")
-        conn.execute("DROP TABLE IF EXISTS phigraph_schema_migrations CASCADE")
-        conn.commit()
-        apply_postgres_migrations(conn)
-        conn.commit()
+    if result.returncode != 0:
+        pytest.fail(result.stderr or result.stdout)
+    assert result.stdout.strip() == "1"
+    reset_postgres_scoped_schema(postgres_dsn)
