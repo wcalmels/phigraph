@@ -80,7 +80,7 @@ def test_wheel_installed_module_loads_migration_sql(
     scripts = "Scripts" if sys.platform == "win32" else "bin"
     pip = venv_dir / scripts / "pip"
     python = venv_dir / scripts / "python"
-    subprocess.run([str(pip), "install", f"{built_wheel}[postgres]"], check=True)
+    subprocess.run([str(pip), "install", f"{built_wheel}[postgres,benchmark]"], check=True)
     env = os.environ.copy()
     env["PHIGRAPH_POSTGRES_DSN"] = postgres_dsn
     smoke_script = Path(__file__).with_name("_wheel_migration_smoke.py")

@@ -290,6 +290,17 @@ def verify_postgres_schema(conn: Any) -> None:
         if exists is None or exists[0] is None:
             raise TransactionUnavailable(f"PostgreSQL scoped schema missing table: {table}")
 
+    _verify_table_columns(
+        conn,
+        table="phigraph_schema_migrations",
+        expected=_EXPECTED_SCHEMA_MIGRATIONS_COLUMNS,
+    )
+    migration_primary_keys = _constraint_columns(conn, "phigraph_schema_migrations", "p")
+    if _EXPECTED_SCHEMA_MIGRATIONS_PRIMARY_KEY not in migration_primary_keys:
+        raise TransactionUnavailable(
+            "PostgreSQL scoped schema missing primary key on phigraph_schema_migrations.version"
+        )
+
     expected_checksum = scoped_ledger_migration_checksum()
     version_row = conn.execute(
         """
@@ -305,17 +316,6 @@ def verify_postgres_schema(conn: Any) -> None:
     if version_row[0] != expected_checksum:
         raise TransactionUnavailable(
             f"PostgreSQL scoped schema migration checksum mismatch for {SCOPED_LEDGER_MIGRATION_VERSION}"
-        )
-
-    _verify_table_columns(
-        conn,
-        table="phigraph_schema_migrations",
-        expected=_EXPECTED_SCHEMA_MIGRATIONS_COLUMNS,
-    )
-    migration_primary_keys = _constraint_columns(conn, "phigraph_schema_migrations", "p")
-    if _EXPECTED_SCHEMA_MIGRATIONS_PRIMARY_KEY not in migration_primary_keys:
-        raise TransactionUnavailable(
-            "PostgreSQL scoped schema missing primary key on phigraph_schema_migrations.version"
         )
 
     _verify_table_columns(
