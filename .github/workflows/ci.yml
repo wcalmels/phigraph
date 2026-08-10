@@ -81,7 +81,10 @@ jobs:
             tests/contract/test_transactional_postgres_migration.py \
             tests/contract/test_transactional_postgres_schema.py \
             tests/contract/test_transactional_postgres_extended.py \
-            tests/contract/test_postgres_wheel_migration.py -v
+            tests/contract/test_postgres_wheel_migration.py \
+            tests/contract/test_grdi_encapsulation.py \
+            tests/contract/test_grdi_transactional_postgres.py \
+            tests/contract/test_grdi_cutover_rc7.py -v
 
   package:
     runs-on: ubuntu-latest

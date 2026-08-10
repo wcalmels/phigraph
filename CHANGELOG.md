@@ -1,5 +1,13 @@
 # Changelog
 
+## 4.1.0-rc.8 - 2026-08-10 (development candidate)
+
+- GRDI transactional refactor (ADR-022): public scoped API only in production GRDI code.
+- Added append-only `gateway_decision_events` with deterministic keys and timestamps.
+- PostgreSQL migration `002_gateway_decision_events.sql`; SQLite/JSON legacy cutover helpers.
+- GRDI plan projection fields: `signed_gateway_decision`, `current_gateway_state`, `gateway_events`.
+- GRDI 0.5.0; gateway events protocol 0.1.0.
+
 ## 4.1.0-rc.7 - 2026-08-10 (development candidate)
 
 - Implemented PostgreSQL scoped transactional ledger (ADR-021) with explicit migrations.

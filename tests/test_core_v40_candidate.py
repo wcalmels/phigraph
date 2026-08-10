@@ -6,7 +6,7 @@ def test_frozen_public_protocol_imports():
     from phigraph.protocol import Claim, Evidence, PROTOCOL_VERSION, CORE_VERSION
     assert Claim and Evidence
     assert PROTOCOL_VERSION == "2.0.0"
-    assert CORE_VERSION == "4.1.0-rc.7"
+    assert CORE_VERSION == "4.1.0-rc.8"
 
 
 def test_stable_core_and_code_namespaces():

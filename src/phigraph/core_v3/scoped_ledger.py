@@ -16,6 +16,7 @@ from .backends import JsonLedgerBackend, LedgerBackend, PostgreSQLLedgerBackend,
 from .transactions import (
     CHAIN_LINKED_COLLECTIONS,
     LEGACY_CANONICAL_KEY_FIELDS,
+    LEGACY_MIGRATABLE_SCOPED_COLLECTIONS,
     MAX_LIST_LIMIT,
     SCOPED_COLLECTIONS,
     CompareAndSetResult,
@@ -66,6 +67,25 @@ CREATE TABLE IF NOT EXISTS phigraph_chain_heads (
     updated_at       TEXT NOT NULL,
     PRIMARY KEY (tenant_id, project_id, collection)
 );
+
+CREATE TABLE IF NOT EXISTS phigraph_scoped_schema_migrations (
+    version     TEXT PRIMARY KEY,
+    checksum    TEXT NOT NULL,
+    applied_at  TEXT NOT NULL
+);
+"""
+
+SQLITE_GATEWAY_EVENTS_MIGRATION_VERSION = "002_gateway_decision_events"
+SQLITE_GATEWAY_EVENTS_MIGRATION_CHECKSUM = "grdi-gateway-events-index-v1"
+
+
+def _sqlite_partial_chain_index_sql() -> str:
+    collections = ", ".join(f"'{name}'" for name in sorted(CHAIN_LINKED_COLLECTIONS))
+    return f"""
+DROP INDEX IF EXISTS uq_scoped_chain_sequence_linked;
+CREATE UNIQUE INDEX IF NOT EXISTS uq_scoped_chain_sequence_linked
+ON phigraph_scoped_ledger (tenant_id, project_id, collection, chain_sequence)
+WHERE collection IN ({collections});
 """
 
 
@@ -393,14 +413,35 @@ class ScopedLedgerEngine:
         with self.backend._lock, self.backend._connect() as conn:
             conn.execute(f"PRAGMA busy_timeout = {SQLITE_BUSY_TIMEOUT_MS}")
             conn.executescript(SCOPED_LEDGER_DDL)
-            conn.execute(
-                f"""
-                CREATE UNIQUE INDEX IF NOT EXISTS uq_scoped_chain_sequence_linked
-                ON phigraph_scoped_ledger (tenant_id, project_id, collection, chain_sequence)
-                WHERE collection IN ({self._chain_linked_sql_in_list()})
-                """
-            )
+            self._apply_sqlite_scoped_migrations(conn)
             conn.commit()
+
+    def _apply_sqlite_scoped_migrations(self, conn: sqlite3.Connection) -> None:
+        row = conn.execute(
+            """
+            SELECT checksum FROM phigraph_scoped_schema_migrations
+            WHERE version = ?
+            """,
+            (SQLITE_GATEWAY_EVENTS_MIGRATION_VERSION,),
+        ).fetchone()
+        if row is not None:
+            if row[0] != SQLITE_GATEWAY_EVENTS_MIGRATION_CHECKSUM:
+                raise TransactionUnavailable(
+                    f"SQLite scoped migration checksum mismatch for {SQLITE_GATEWAY_EVENTS_MIGRATION_VERSION}"
+                )
+            return
+        conn.executescript(_sqlite_partial_chain_index_sql())
+        conn.execute(
+            """
+            INSERT INTO phigraph_scoped_schema_migrations (version, checksum, applied_at)
+            VALUES (?, ?, ?)
+            """,
+            (
+                SQLITE_GATEWAY_EVENTS_MIGRATION_VERSION,
+                SQLITE_GATEWAY_EVENTS_MIGRATION_CHECKSUM,
+                _utc_now(),
+            ),
+        )
 
     def _read_json_state(self) -> _ScopedStoreState:
         if not isinstance(self.backend, JsonLedgerBackend):
@@ -863,6 +904,94 @@ class ScopedLedgerEngine:
                 offset=offset,
             )
         raise TransactionUnavailable("Scoped list is not implemented for this backend")
+
+    def admin_list_scoped(
+        self,
+        collection: str,
+        *,
+        tenant_id: str | None = None,
+        project_id: str | None = None,
+        limit: int = MAX_LIST_LIMIT,
+        offset: int = 0,
+    ) -> list[dict[str, Any]]:
+        """Administrative scoped listing with optional scope filter (cutover/backfill)."""
+        if tenant_id is not None and project_id is not None:
+            return self._list_scoped(
+                collection,
+                tenant_id=tenant_id,
+                project_id=project_id,
+                limit=limit,
+                offset=offset,
+            )
+        validate_collection(collection, read=True)
+        if offset < 0:
+            raise ValueError("offset must be non-negative")
+        if limit < 1 or limit > MAX_LIST_LIMIT:
+            raise ValueError(f"limit must be between 1 and {MAX_LIST_LIMIT}")
+        self._ensure_multiprocess_json_allowed()
+        if isinstance(self.backend, JsonLedgerBackend):
+            with self._lock:
+                state = self._active_state() if self._tls().tx_depth else self._read_json_state()
+            rows = [row for row in state.records.values() if row.collection == collection]
+            if tenant_id is not None:
+                rows = [row for row in rows if row.tenant_id == tenant_id]
+            if project_id is not None:
+                rows = [row for row in rows if row.project_id == project_id]
+            rows.sort(key=lambda item: (item.tenant_id, item.project_id, item.chain_sequence, item.record_id))
+            return [row.to_public() for row in rows[offset:offset + limit]]
+        if isinstance(self.backend, SQLiteLedgerBackend):
+            if tenant_id is not None and project_id is not None:
+                query = """
+                    SELECT payload FROM phigraph_scoped_ledger
+                    WHERE collection=? AND tenant_id=? AND project_id=?
+                    ORDER BY tenant_id, project_id, chain_sequence ASC, record_id ASC
+                    LIMIT ? OFFSET ?
+                """
+                params: list[Any] = [collection, tenant_id, project_id, limit, offset]
+            elif tenant_id is not None:
+                query = """
+                    SELECT payload FROM phigraph_scoped_ledger
+                    WHERE collection=? AND tenant_id=?
+                    ORDER BY tenant_id, project_id, chain_sequence ASC, record_id ASC
+                    LIMIT ? OFFSET ?
+                """
+                params = [collection, tenant_id, limit, offset]
+            elif project_id is not None:
+                query = """
+                    SELECT payload FROM phigraph_scoped_ledger
+                    WHERE collection=? AND project_id=?
+                    ORDER BY tenant_id, project_id, chain_sequence ASC, record_id ASC
+                    LIMIT ? OFFSET ?
+                """
+                params = [collection, project_id, limit, offset]
+            else:
+                query = """
+                    SELECT payload FROM phigraph_scoped_ledger
+                    WHERE collection=?
+                    ORDER BY tenant_id, project_id, chain_sequence ASC, record_id ASC
+                    LIMIT ? OFFSET ?
+                """
+                params = [collection, limit, offset]
+            tls = self._tls()
+            conn = tls.sqlite_conn
+            close = conn is None
+            if close:
+                conn = self.backend._connect()
+            try:
+                fetched = conn.execute(query, tuple(params)).fetchall()
+                return [json.loads(item[0]) for item in fetched]
+            finally:
+                if close and conn is not None:
+                    conn.close()
+        if self._postgres is not None:
+            return self._postgres.admin_list_scoped(
+                collection,
+                tenant_id=tenant_id,
+                project_id=project_id,
+                limit=limit,
+                offset=offset,
+            )
+        raise TransactionUnavailable("Administrative scoped list is not implemented for this backend")
 
     def _compare_and_set_scoped(
         self,
@@ -1364,7 +1493,7 @@ def migrate_legacy_scoped_sqlite(ledger: Any) -> dict[str, Any]:
         conn.execute(f"PRAGMA busy_timeout = {SQLITE_BUSY_TIMEOUT_MS}")
         conn.execute("BEGIN IMMEDIATE")
         try:
-            for coll in SCOPED_COLLECTIONS:
+            for coll in LEGACY_MIGRATABLE_SCOPED_COLLECTIONS:
                 rows = conn.execute(
                     "SELECT payload FROM ledger WHERE collection=? ORDER BY rowid",
                     (coll,),
@@ -1475,4 +1604,72 @@ def migrate_legacy_scoped_sqlite(ledger: Any) -> dict[str, Any]:
         except Exception:
             conn.rollback()
             raise
+    return stats
+
+
+def migrate_legacy_scoped_json(ledger: Any) -> dict[str, Any]:
+    """Explicit one-shot migration from legacy JSON ledger arrays to scoped sidecar store."""
+    backend = ledger.backend
+    if not isinstance(backend, JsonLedgerBackend):
+        raise TransactionUnavailable("Legacy scoped migration requires JSON backend")
+    engine = ScopedLedgerEngine(backend, transactional_mode=ledger.transactional_mode)
+    stats = {"inserted": 0, "skipped": 0, "collections": {}}
+    with backend._lock, engine._lock:
+        payload = backend.read_all()
+        state = engine._read_json_state()
+        for coll in LEGACY_MIGRATABLE_SCOPED_COLLECTIONS:
+            rows = payload.get(coll, [])
+            canonical_field = LEGACY_CANONICAL_KEY_FIELDS[coll]
+            seen: dict[tuple[str, str, str], str] = {}
+            for row in rows:
+                scope = row.get("scope", {})
+                t_id = scope.get("tenant_id", "default")
+                p_id = scope.get("project_id", "default")
+                canonical_key = str(row[canonical_field])
+                dedupe_key = (t_id, p_id, canonical_key)
+                record = {k: v for k, v in row.items() if k != "_chain"}
+                payload_hash = canonical_scoped_payload_hash(record)
+                if dedupe_key in seen:
+                    if seen[dedupe_key] != payload_hash:
+                        raise DuplicateCanonicalKey(
+                            f"Migration duplicate with conflicting hash: {coll}/{canonical_key}"
+                        )
+                    stats["skipped"] += 1
+                    continue
+                seen[dedupe_key] = payload_hash
+                key = _scoped_key(t_id, p_id, coll, canonical_key)
+                if key in state.records:
+                    if state.records[key].payload_hash != payload_hash:
+                        raise DuplicateCanonicalKey(
+                            f"Scoped row exists with different hash: {coll}/{canonical_key}"
+                        )
+                    stats["skipped"] += 1
+                    continue
+                head_key = _head_key(t_id, p_id, coll)
+                head = state.heads.get(head_key, {"last_sequence": 0, "last_chain_hash": None})
+                last_sequence = int(head.get("last_sequence", 0))
+                chain_prev = head.get("last_chain_hash")
+                next_sequence = last_sequence + 1
+                stored = engine._build_row(
+                    collection=coll,
+                    record=record,
+                    canonical_key=canonical_key,
+                    tenant_id=t_id,
+                    project_id=p_id,
+                    chain_prev=chain_prev,
+                    chain_sequence=next_sequence,
+                    chain_linked=True,
+                )
+                state.records[key] = stored
+                state.heads[head_key] = {
+                    "tenant_id": t_id,
+                    "project_id": p_id,
+                    "collection": coll,
+                    "last_sequence": next_sequence,
+                    "last_chain_hash": stored.chain_hash,
+                    "updated_at": _utc_now(),
+                }
+                stats["inserted"] += 1
+            stats["collections"][coll] = len(rows)
+        engine._write_json_state(state)
     return stats

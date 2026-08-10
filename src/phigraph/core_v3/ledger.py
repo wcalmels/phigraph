@@ -22,11 +22,13 @@ from .postgres_scoped import migrate_legacy_scoped_postgres
 from .scoped_ledger import (
     ScopedLedgerEngine,
     ScopedTransactionSession,
+    migrate_legacy_scoped_json,
     migrate_legacy_scoped_sqlite,
 )
 from .transactions import (
     CompareAndSetResult,
     LockRef,
+    MAX_LIST_LIMIT,
     ScopedRecordResult,
     TransactionUnavailable,
     canonical_scoped_payload_hash,
@@ -49,6 +51,7 @@ class EvidenceLedger:
         "authority_decisions",
         "execution_requests",
         "gateway_decisions",
+        "gateway_decision_events",
         "shadow_execution_receipts",
         "shadow_outcomes",
         "replay_reports",
@@ -477,3 +480,36 @@ class EvidenceLedger:
         if not isinstance(self.backend, PostgreSQLLedgerBackend):
             raise TransactionUnavailable("migrate_legacy_scoped_postgres requires PostgreSQL backend")
         return migrate_legacy_scoped_postgres(self)
+
+    def migrate_legacy_scoped_json(self) -> dict[str, Any]:
+        """Explicit JSON migration from main ledger file to scoped sidecar store."""
+        if not isinstance(self.backend, JsonLedgerBackend):
+            raise TransactionUnavailable("migrate_legacy_scoped_json requires JSON backend")
+        return migrate_legacy_scoped_json(self)
+
+    def admin_list_scoped(
+        self,
+        collection: str,
+        *,
+        tenant_id: str | None = None,
+        project_id: str | None = None,
+        limit: int = MAX_LIST_LIMIT,
+        offset: int = 0,
+    ) -> list[dict[str, Any]]:
+        """Administrative scoped listing with optional scope filter."""
+        return self._scoped_engine.admin_list_scoped(
+            collection,
+            tenant_id=tenant_id,
+            project_id=project_id,
+            limit=limit,
+            offset=offset,
+        )
+
+    def ensure_postgres_scoped_migrations(self) -> list[str]:
+        """Apply pending PostgreSQL scoped schema migrations (admin/cutover)."""
+        if not isinstance(self.backend, PostgreSQLLedgerBackend):
+            raise TransactionUnavailable("ensure_postgres_scoped_migrations requires PostgreSQL backend")
+
+        from .postgres_migrations import bootstrap_postgres_scoped_schema
+
+        return bootstrap_postgres_scoped_schema(self.backend.dsn)

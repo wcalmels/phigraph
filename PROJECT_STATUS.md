@@ -1,22 +1,23 @@
 # PhiGraph Project Status
 
 **Last updated:** 2026-08-10
-**Branch:** `feature/core-transactional-ledger-postgres-v1`
-**Release target:** 4.1.0-rc.7 → 4.1.0 stable
+**Branch:** `feature/grdi-transactional-ledger-refactor-v1`
+**Release target:** 4.1.0-rc.8 → 4.1.0 stable
 
 ## Executive summary
 
-PhiGraph Core **4.1.0-rc.7** adds PostgreSQL scoped transactional ledger support
-(ADR-021) with explicit migrations, advisory locks, and legacy `phigraph_core_ledger`
-cutover. JSON and SQLite paths from 4.1.0-rc.6 are unchanged. GRDI continues on
-legacy scoped methods until a follow-up refactor PR.
+PhiGraph Core **4.1.0-rc.8** completes the GRDI transactional ledger refactor (ADR-022):
+production GRDI uses only public scoped APIs, gateway simulation is event-sourced via
+`gateway_decision_events`, and JSON/SQLite/PostgreSQL legacy GRDI data migrates explicitly
+before service enablement. Migration **001** bytes are unchanged; **002** extends the chain index.
 
 ## Current versions
 
 | Artifact | Version |
 |----------|---------|
-| Core | 4.1.0-rc.7 (development candidate) |
-| GRDI | 0.4.0 (Replay Audit) |
+| Core | 4.1.0-rc.8 (development candidate) |
+| GRDI | 0.5.0 |
+| GRDI gateway events protocol | 0.1.0 |
 | Transactional Ledger protocol | 0.2.0 |
 | Replay Audit protocol | 0.1.0 |
 | Outcome Ledger protocol | 0.1.0 |
@@ -26,22 +27,19 @@ legacy scoped methods until a follow-up refactor PR.
 
 ## Completed (this branch)
 
-- [x] Public transactional API on `EvidenceLedger` (JSON + SQLite)
-- [x] SQLite scoped tables + `BEGIN IMMEDIATE` transactions
-- [x] Explicit legacy SQLite migration (`migrate_legacy_scoped_sqlite`)
-- [x] 19 contract tests including multiprocess SQLite
-- [x] ADR-020 JSON/SQLite marked IMPLEMENTED
-- [x] Conformance report and release notes
+- [x] `gateway_decision_events` append-only model with deterministic identity
+- [x] PostgreSQL migration 002 + SQLite auto-migration + JSON legacy cutover
+- [x] GRDI service refactor to public scoped transactional API
+- [x] Cutover helpers and RC7 upgrade tests (JSON/SQLite/PostgreSQL)
+- [x] ADR-022, protocol v1, conformance report, release notes rc.8
 
 ## In progress
 
-- [ ] GRDI service refactor to public transactional API
-- [ ] PostgreSQL scoped DDL + migration
-- [ ] `gateway_decision_events` append-only model
+- [ ] Production deploy wiring for pilot environments
 
 ## Test status
 
-- **287** automated tests passing locally
+- Full pytest green locally (PostgreSQL contract tests skip without `PHIGRAPH_POSTGRES_DSN`)
 
 ## Known limitations
 

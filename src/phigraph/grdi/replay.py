@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Any
 
 from phigraph.core_v3.ledger import EvidenceLedger
+from phigraph.core_v3.transactions import LedgerIntegrityError, MAX_LIST_LIMIT
 from phigraph.grdi.models import (
     ComparisonState,
     ExecutionState,
@@ -99,11 +100,23 @@ class ReplayEngine:
         tenant_id: str,
         project_id: str,
         requested_by: str,
+        session: Any | None = None,
     ) -> ReplayReport:
         validation_results: list[dict[str, Any]] = []
         drift_reasons: list[str] = []
-        rows = self._load_chain_rows(plan_id, tenant_id=tenant_id, project_id=project_id)
-        chain = self.core.ledger.verify_chain()
+        rows = self._load_chain_rows(
+            plan_id,
+            tenant_id=tenant_id,
+            project_id=project_id,
+            session=session,
+        )
+        try:
+            chain = self.core.ledger.verify_scoped_chain(
+                tenant_id=tenant_id,
+                project_id=project_id,
+            )
+        except LedgerIntegrityError as exc:
+            chain = {"valid": False, "reason": str(exc)}
         if not chain.get("valid"):
             validation_results.append(
                 {
@@ -131,6 +144,7 @@ class ReplayEngine:
             drift_reasons=drift_reasons,
             tenant_id=tenant_id,
             project_id=project_id,
+            session=session,
         )
 
         draft = ReplayReport.create(
@@ -193,13 +207,21 @@ class ReplayEngine:
             if expected != current:
                 drifts.append(f"source_hash_mismatch:{label}")
 
-        chain = self.core.ledger.verify_chain()
+        try:
+            chain = self.core.ledger.verify_scoped_chain(
+                tenant_id=report.tenant_id,
+                project_id=report.project_id,
+            )
+        except LedgerIntegrityError as exc:
+            drifts.append(f"source_chain_invalid:{exc}")
+            return drifts
         if not chain.get("valid"):
             drifts.append(f"source_chain_invalid:{chain.get('reason')}:{chain.get('collection')}")
         else:
             heads = chain.get("heads", {})
             for collection, head in report.manifest.source_chain_heads.items():
-                if head != heads.get(collection):
+                current_head = heads.get(f"{report.tenant_id}/{report.project_id}/{collection}")
+                if head != current_head:
                     drifts.append(f"chain_head_changed:{collection}")
 
         envelope = rows.get("decision_envelope")
@@ -365,6 +387,7 @@ class ReplayEngine:
         *,
         tenant_id: str,
         project_id: str,
+        session: Any | None = None,
     ) -> dict[str, dict[str, Any] | None]:
         rows: dict[str, dict[str, Any] | None] = {
             "execution_request": None,
@@ -375,7 +398,14 @@ class ReplayEngine:
             "shadow_outcome": None,
         }
         try:
-            rows["execution_request"] = self._find_row("execution_requests", "plan_id", plan_id, tenant_id, project_id)
+            rows["execution_request"] = self._find_row(
+                "execution_requests",
+                "plan_id",
+                plan_id,
+                tenant_id,
+                project_id,
+                session=session,
+            )
         except KeyError:
             return rows
 
@@ -389,6 +419,7 @@ class ReplayEngine:
             tenant_id,
             project_id,
             required=False,
+            session=session,
         )
         rows["decision_envelope"] = self._find_row(
             "decision_envelopes",
@@ -397,6 +428,7 @@ class ReplayEngine:
             tenant_id,
             project_id,
             required=False,
+            session=session,
         )
         rows["authority_decision"] = self._find_row(
             "authority_decisions",
@@ -405,6 +437,7 @@ class ReplayEngine:
             tenant_id,
             project_id,
             required=False,
+            session=session,
         )
         rows["shadow_execution_receipt"] = self._find_row(
             "shadow_execution_receipts",
@@ -413,6 +446,7 @@ class ReplayEngine:
             tenant_id,
             project_id,
             required=False,
+            session=session,
         )
         receipt = rows["shadow_execution_receipt"]
         if receipt is not None:
@@ -423,6 +457,7 @@ class ReplayEngine:
                 tenant_id,
                 project_id,
                 required=False,
+                session=session,
             )
         else:
             rows["shadow_outcome"] = self._find_row(
@@ -432,6 +467,7 @@ class ReplayEngine:
                 tenant_id,
                 project_id,
                 required=False,
+                session=session,
             )
         return rows
 
@@ -444,8 +480,34 @@ class ReplayEngine:
         project_id: str,
         *,
         required: bool = True,
+        session: Any | None = None,
     ) -> dict[str, Any] | None:
-        matches = self.core.ledger.query(collection, tenant_id=tenant_id, project_id=project_id, limit=100000)
+        from phigraph.core_v3.transactions import LEGACY_CANONICAL_KEY_FIELDS, ScopedRecordNotFound
+
+        canonical_field = LEGACY_CANONICAL_KEY_FIELDS.get(collection)
+        if canonical_field is not None and key == canonical_field:
+            try:
+                if session is not None:
+                    return session.get_scoped(collection, canonical_key=value)
+                return self.core.ledger.get_scoped(
+                    collection,
+                    canonical_key=value,
+                    tenant_id=tenant_id,
+                    project_id=project_id,
+                )
+            except ScopedRecordNotFound:
+                if required:
+                    raise KeyError(f"{collection}_not_found_in_scope") from None
+                return None
+        if session is not None:
+            matches = session.list_scoped(collection, limit=MAX_LIST_LIMIT)
+        else:
+            matches = self.core.ledger.list_scoped(
+                collection,
+                tenant_id=tenant_id,
+                project_id=project_id,
+                limit=MAX_LIST_LIMIT,
+            )
         row = next((item for item in matches if item.get(key) == value), None)
         if row is None and required:
             raise KeyError(f"{collection}_not_found_in_scope")
@@ -490,6 +552,8 @@ class ReplayEngine:
                 self.service._validate_shadow_receipt(shadow_receipt, execution_request)
             except ValueError as exc:
                 reasons.append({"check": "shadow_receipt", "status": "invalid", "reason": str(exc)})
+            except (KeyError, TypeError) as exc:
+                reasons.append({"check": "shadow_receipt", "status": "invalid", "reason": str(exc)})
         if outcome is not None and request is not None and receipt is not None:
             try:
                 execution_request = self.service._execution_request_from_row(request)
@@ -497,6 +561,8 @@ class ReplayEngine:
                 shadow_outcome = self.service._shadow_outcome_from_row(outcome)
                 self.service._validate_shadow_outcome(shadow_outcome, execution_request, shadow_receipt)
             except ValueError as exc:
+                reasons.append({"check": "shadow_outcome", "status": "invalid", "reason": str(exc)})
+            except (KeyError, TypeError) as exc:
                 reasons.append({"check": "shadow_outcome", "status": "invalid", "reason": str(exc)})
 
         if request is not None and envelope is not None and request.get("envelope_id") != envelope.get("envelope_id"):
@@ -553,7 +619,7 @@ class ReplayEngine:
         }
         heads = chain.get("heads", {})
         source_chain_heads = {
-            collection: heads.get(collection)
+            collection: heads.get(f"{tenant_id}/{project_id}/{collection}")
             for collection in GRDI_CHAIN_COLLECTIONS
         }
         decision_identity = self._extract_decision_identity(envelope) if envelope else {
@@ -592,13 +658,19 @@ class ReplayEngine:
         drift_reasons: list[str],
         tenant_id: str,
         project_id: str,
+        session: Any | None = None,
     ) -> ReplayState:
         if any(item.get("status") == "invalid" for item in validation_results):
             return ReplayState.INVALID
         if any(item.get("status") == "incomplete" for item in validation_results):
             return ReplayState.INCOMPLETE
 
-        prior_valid, skipped = self._validated_prior_reports(plan_id, tenant_id=tenant_id, project_id=project_id)
+        prior_valid, skipped = self._validated_prior_reports(
+            plan_id,
+            tenant_id=tenant_id,
+            project_id=project_id,
+            session=session,
+        )
         drift_reasons.extend(skipped)
 
         matching = [item for item in prior_valid if item.manifest_hash == manifest_hash_value]
@@ -639,20 +711,41 @@ class ReplayEngine:
         *,
         tenant_id: str,
         project_id: str,
+        session: Any | None = None,
     ) -> tuple[list[ReplayReport], list[str]]:
         prior_valid: list[ReplayReport] = []
         skipped: list[str] = []
-        for row in self._list_prior_reports(plan_id, tenant_id=tenant_id, project_id=project_id):
+        for row in self._list_prior_reports(
+            plan_id,
+            tenant_id=tenant_id,
+            project_id=project_id,
+            session=session,
+        ):
             try:
                 report = ReplayReport.from_dict(row)
                 self._validate_report_historical(report)
                 prior_valid.append(report)
-            except ValueError as exc:
+            except (ValueError, KeyError, TypeError) as exc:
                 skipped.append(f"prior_replay_invalid:{row.get('replay_id')}:{exc}")
         return prior_valid, skipped
 
-    def _list_prior_reports(self, plan_id: str, *, tenant_id: str, project_id: str) -> list[dict[str, Any]]:
-        rows = self.core.ledger.query("replay_reports", tenant_id=tenant_id, project_id=project_id, limit=100000)
+    def _list_prior_reports(
+        self,
+        plan_id: str,
+        *,
+        tenant_id: str,
+        project_id: str,
+        session: Any | None = None,
+    ) -> list[dict[str, Any]]:
+        if session is not None:
+            rows = session.list_scoped("replay_reports", limit=MAX_LIST_LIMIT)
+        else:
+            rows = self.core.ledger.list_scoped(
+                "replay_reports",
+                tenant_id=tenant_id,
+                project_id=project_id,
+                limit=MAX_LIST_LIMIT,
+            )
         return [row for row in rows if row.get("plan_id") == plan_id]
 
     def _compare_pair(

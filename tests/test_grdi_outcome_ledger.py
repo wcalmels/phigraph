@@ -3,6 +3,7 @@ from __future__ import annotations
 from concurrent.futures import ThreadPoolExecutor
 
 import pytest
+from grdi_scoped_helpers import assert_scoped_chain_valid, mutate_scoped_row, scoped_rows
 from test_grdi_foundation import _envelope
 
 from phigraph.core_v3.service import CoreV3Service
@@ -63,22 +64,15 @@ def _simulated_plan(tmp_path, **plan_overrides):
 
 
 def _mutate_ledger_row(core, collection, unique_key, record_id, changes, *, tenant_id, project_id):
-    rows = core.ledger.query(collection, tenant_id=tenant_id, project_id=project_id, limit=100000)
-    row = next(item for item in rows if item[unique_key] == record_id)
-    clean = {key: value for key, value in row.items() if key not in {"_chain", "scope"}}
-    clean.update(changes)
-    with core.ledger._lock:
-        payload = core.ledger._read()
-        for index, existing in enumerate(payload[collection]):
-            if existing[unique_key] != record_id:
-                continue
-            scope = existing.get("scope", {})
-            if scope.get("tenant_id") != tenant_id or scope.get("project_id") != project_id:
-                raise KeyError(f"scoped_record_not_found:{record_id}")
-            payload[collection][index] = {**clean, "scope": scope}
-            core.ledger._write(core.ledger._rechain_payload(payload))
-            return
-    raise KeyError(f"scoped_record_not_found:{record_id}")
+    mutate_scoped_row(
+        core.ledger,
+        collection,
+        unique_key,
+        record_id,
+        changes,
+        tenant_id=tenant_id,
+        project_id=project_id,
+    )
 
 
 def test_consistent_outcome_with_full_coverage(tmp_path):
@@ -269,7 +263,7 @@ def test_concurrent_recording_creates_single_outcome(tmp_path):
 
     outcome_ids = {item["outcome_id"] for item in outcomes}
     assert len(outcome_ids) == 1
-    assert len(core.ledger.query("shadow_outcomes", tenant_id="tenant-a", project_id="project-a")) == 1
+    assert len(scoped_rows(core.ledger, "shadow_outcomes", tenant_id="tenant-a", project_id="project-a")) == 1
 
 
 def test_json_persistence_and_restart(tmp_path):
@@ -281,7 +275,7 @@ def test_json_persistence_and_restart(tmp_path):
         recorded_by="human-verifier",
         effect_assessments=(_matched_assessment("staging promotion recorded"),),
     )
-    assert core.ledger.verify_chain()["valid"] is True
+    assert_scoped_chain_valid(core.ledger, tenant_id="tenant-a", project_id="project-a")
 
     reopened = CoreV3Service(data_dir=tmp_path, receipt_signing_key="secret")
     stored = GRDIService(reopened).get_outcome_for_plan(
@@ -328,7 +322,7 @@ def test_sqlite_persistence_and_restart(tmp_path):
         project_id="project-a",
     )
     assert stored["outcome_state"] == ShadowOutcomeState.CONSISTENT.value
-    assert reopened.ledger.verify_chain()["valid"] is True
+    assert_scoped_chain_valid(reopened.ledger, tenant_id="tenant-a", project_id="project-a")
 
 
 def test_manipulated_outcome_fails_on_read(tmp_path):

@@ -7,7 +7,7 @@ from typing import Any, Callable
 
 from .backends import PostgreSQLLedgerBackend
 from .postgres_advisory import acquire_advisory_locks, implicit_write_lock_refs
-from .postgres_migrations import verify_postgres_schema
+from .postgres_migrations import apply_postgres_migrations
 from .scoped_ledger import (
     _ChainHeadView,
     _ChainRowView,
@@ -19,6 +19,7 @@ from .scoped_ledger import (
 from .transactions import (
     CHAIN_LINKED_COLLECTIONS,
     LEGACY_CANONICAL_KEY_FIELDS,
+    LEGACY_MIGRATABLE_SCOPED_COLLECTIONS,
     MAX_LIST_LIMIT,
     SCOPED_COLLECTIONS,
     CompareAndSetResult,
@@ -55,7 +56,8 @@ class PostgresScopedEngine:
         self._tls = tls_getter
         self._build_row = build_row
         with backend._connect() as conn:
-            verify_postgres_schema(conn)
+            apply_postgres_migrations(conn)
+            conn.commit()
 
     def _conn_for_op(self) -> tuple[Any, bool]:
         tls = self._tls()
@@ -433,6 +435,67 @@ class PostgresScopedEngine:
             if close and conn is not None:
                 conn.close()
 
+    def admin_list_scoped(
+        self,
+        collection: str,
+        *,
+        tenant_id: str | None = None,
+        project_id: str | None = None,
+        limit: int = MAX_LIST_LIMIT,
+        offset: int = 0,
+    ) -> list[dict[str, Any]]:
+        validate_collection(collection, read=True)
+        if offset < 0:
+            raise ValueError("offset must be non-negative")
+        if limit < 1 or limit > MAX_LIST_LIMIT:
+            raise ValueError(f"limit must be between 1 and {MAX_LIST_LIMIT}")
+        if tenant_id is not None and project_id is not None:
+            query = """
+                SELECT payload FROM phigraph_scoped_ledger
+                WHERE collection = %s AND tenant_id = %s AND project_id = %s
+                ORDER BY tenant_id, project_id, chain_sequence ASC, record_id ASC
+                LIMIT %s OFFSET %s
+            """
+            params: list[Any] = [collection, tenant_id, project_id, limit, offset]
+        elif tenant_id is not None:
+            query = """
+                SELECT payload FROM phigraph_scoped_ledger
+                WHERE collection = %s AND tenant_id = %s
+                ORDER BY tenant_id, project_id, chain_sequence ASC, record_id ASC
+                LIMIT %s OFFSET %s
+            """
+            params = [collection, tenant_id, limit, offset]
+        elif project_id is not None:
+            query = """
+                SELECT payload FROM phigraph_scoped_ledger
+                WHERE collection = %s AND project_id = %s
+                ORDER BY tenant_id, project_id, chain_sequence ASC, record_id ASC
+                LIMIT %s OFFSET %s
+            """
+            params = [collection, project_id, limit, offset]
+        else:
+            query = """
+                SELECT payload FROM phigraph_scoped_ledger
+                WHERE collection = %s
+                ORDER BY tenant_id, project_id, chain_sequence ASC, record_id ASC
+                LIMIT %s OFFSET %s
+            """
+            params = [collection, limit, offset]
+        tls = self._tls()
+        conn = tls.postgres_conn
+        close = conn is None
+        if close:
+            conn = self._backend._connect()
+        try:
+            rows = conn.execute(query, tuple(params)).fetchall()
+            return [
+                (raw if isinstance(raw, dict) else json.loads(raw))
+                for (raw,) in rows
+            ]
+        finally:
+            if close and conn is not None:
+                conn.close()
+
     def compare_and_set_scoped(
         self,
         collection: str,
@@ -724,7 +787,7 @@ def migrate_legacy_scoped_postgres(ledger: Any, *, conn: Any | None = None) -> d
     if own_conn:
         conn = backend._connect()
     try:
-        for coll in SCOPED_COLLECTIONS:
+        for coll in LEGACY_MIGRATABLE_SCOPED_COLLECTIONS:
             rows = conn.execute(
                 """
                 SELECT payload FROM phigraph_core_ledger

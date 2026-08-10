@@ -1,4 +1,4 @@
-"""Versioned PostgreSQL schema for scoped transactional ledger (ADR-021)."""
+"""Versioned PostgreSQL schema for scoped transactional ledger (ADR-021 / ADR-022)."""
 
 from __future__ import annotations
 
@@ -6,10 +6,17 @@ import hashlib
 from importlib import resources
 from typing import Any
 
-from .transactions import TransactionUnavailable
+from .transactions import CHAIN_LINKED_COLLECTIONS, TransactionUnavailable
 
 SCOPED_LEDGER_MIGRATION_VERSION = "001_scoped_ledger_v1"
+GATEWAY_EVENTS_MIGRATION_VERSION = "002_gateway_decision_events"
 SCOPED_LEDGER_MIGRATION_FILENAME = "001_scoped_ledger_v1.sql"
+GATEWAY_EVENTS_MIGRATION_FILENAME = "002_gateway_decision_events.sql"
+
+ORDERED_POSTGRES_MIGRATIONS: tuple[tuple[str, str], ...] = (
+    (SCOPED_LEDGER_MIGRATION_VERSION, SCOPED_LEDGER_MIGRATION_FILENAME),
+    (GATEWAY_EVENTS_MIGRATION_VERSION, GATEWAY_EVENTS_MIGRATION_FILENAME),
+)
 
 _LEGACY_CORE_LEDGER_DDL = """
 CREATE TABLE IF NOT EXISTS phigraph_core_ledger (
@@ -81,30 +88,54 @@ _EXPECTED_PARTIAL_CHAIN_INDEX_COLUMNS = (
 
 _PARTIAL_CHAIN_INDEX_NAME = "uq_scoped_chain_sequence_linked"
 
-_CHAIN_LINKED_COLLECTIONS = (
-    "decision_envelopes",
-    "authority_decisions",
-    "execution_requests",
-    "gateway_decisions",
-    "shadow_execution_receipts",
-    "shadow_outcomes",
-    "replay_reports",
-    "historical_comparisons",
-)
+_CHAIN_LINKED_COLLECTIONS = tuple(sorted(CHAIN_LINKED_COLLECTIONS))
+
+# Cluster-wide migration lock for pg_advisory_xact_lock(int, int).
+# Namespace: phigraph:scoped-migration:v1 — do not reuse for scoped write LockRefs.
+_MIGRATION_LOCK_NAMESPACE = "phigraph:scoped-migration:v1"
+_migration_lock_digest = hashlib.sha256(_MIGRATION_LOCK_NAMESPACE.encode("utf-8")).digest()
+MIGRATION_ADVISORY_LOCK_KEY1 = int.from_bytes(_migration_lock_digest[0:4], "big", signed=True)
+MIGRATION_ADVISORY_LOCK_KEY2 = int.from_bytes(_migration_lock_digest[4:8], "big", signed=True)
+
+
+def normalize_migration_sql(text: str) -> str:
+    """Normalize migration SQL to LF newlines for stable cross-platform checksums."""
+    return text.replace("\r\n", "\n").replace("\r", "\n")
+
+
+def load_postgres_migration_sql(filename: str) -> str:
+    """Load packaged migration SQL by filename (wheel-safe via importlib.resources)."""
+    raw = (
+        resources.files("phigraph.core_v3")
+        .joinpath("sql/postgresql", filename)
+        .read_bytes()
+        .decode("utf-8")
+    )
+    return normalize_migration_sql(raw)
 
 
 def load_scoped_ledger_migration_sql() -> str:
-    """Load packaged migration SQL (wheel-safe via importlib.resources)."""
-    return (
-        resources.files("phigraph.core_v3")
-        .joinpath("sql/postgresql", SCOPED_LEDGER_MIGRATION_FILENAME)
-        .read_text(encoding="utf-8")
-    )
+    """Load packaged 001 migration SQL."""
+    return load_postgres_migration_sql(SCOPED_LEDGER_MIGRATION_FILENAME)
+
+
+def load_gateway_events_migration_sql() -> str:
+    """Load packaged 002 migration SQL."""
+    return load_postgres_migration_sql(GATEWAY_EVENTS_MIGRATION_FILENAME)
+
+
+def postgres_migration_checksum(filename: str) -> str:
+    return hashlib.sha256(load_postgres_migration_sql(filename).encode("utf-8")).hexdigest()
 
 
 def scoped_ledger_migration_checksum() -> str:
-    """SHA-256 hex digest of the packaged migration SQL."""
-    return hashlib.sha256(load_scoped_ledger_migration_sql().encode("utf-8")).hexdigest()
+    """SHA-256 hex digest of the packaged 001 migration SQL."""
+    return postgres_migration_checksum(SCOPED_LEDGER_MIGRATION_FILENAME)
+
+
+def gateway_events_migration_checksum() -> str:
+    """SHA-256 hex digest of the packaged 002 migration SQL."""
+    return postgres_migration_checksum(GATEWAY_EVENTS_MIGRATION_FILENAME)
 
 
 def _normalize_pg_type(data_type: str, udt_name: str) -> str:
@@ -245,34 +276,68 @@ def _verify_partial_chain_index(conn: Any) -> None:
             )
 
 
-def apply_postgres_migrations(conn: Any) -> list[str]:
-    """Apply pending forward migrations. Returns applied version ids."""
-    expected_checksum = scoped_ledger_migration_checksum()
-    reg = conn.execute("SELECT to_regclass('public.phigraph_schema_migrations')").fetchone()
-    if reg is not None and reg[0] is not None:
-        row = conn.execute(
-            """
-            SELECT checksum FROM phigraph_schema_migrations
-            WHERE version = %s
-            """,
-            (SCOPED_LEDGER_MIGRATION_VERSION,),
-        ).fetchone()
-        if row is not None:
-            if row[0] != expected_checksum:
-                raise TransactionUnavailable(
-                    f"PostgreSQL migration checksum mismatch for {SCOPED_LEDGER_MIGRATION_VERSION}"
-                )
-            return []
-    sql = load_scoped_ledger_migration_sql()
-    conn.execute(sql)
-    conn.execute(
+def _schema_migrations_table_exists(conn: Any) -> bool:
+    row = conn.execute("SELECT to_regclass('public.phigraph_schema_migrations')").fetchone()
+    return row is not None and row[0] is not None
+
+
+def _migration_checksum_row(conn: Any, version: str) -> str | None:
+    if not _schema_migrations_table_exists(conn):
+        return None
+    row = conn.execute(
         """
-        INSERT INTO phigraph_schema_migrations (version, checksum)
-        VALUES (%s, %s)
+        SELECT checksum FROM phigraph_schema_migrations
+        WHERE version = %s
         """,
-        (SCOPED_LEDGER_MIGRATION_VERSION, expected_checksum),
+        (version,),
+    ).fetchone()
+    if row is None:
+        return None
+    return row[0]
+
+
+def _acquire_migration_advisory_lock(conn: Any) -> None:
+    """Serialize scoped schema migrations across concurrent startup nodes."""
+    conn.execute(
+        "SELECT pg_advisory_xact_lock(%s, %s)",
+        (MIGRATION_ADVISORY_LOCK_KEY1, MIGRATION_ADVISORY_LOCK_KEY2),
     )
-    return [SCOPED_LEDGER_MIGRATION_VERSION]
+
+
+def apply_postgres_migrations(conn: Any, *, verify: bool = True) -> list[str]:
+    """Apply pending forward migrations in order. Returns applied version ids.
+
+    Acquires a transaction-scoped advisory lock, re-reads migration state after
+    locking, applies pending migrations, optionally verifies schema, and leaves
+    commit/rollback to the caller so apply+verify stay atomic.
+    """
+    _acquire_migration_advisory_lock(conn)
+    applied: list[str] = []
+    for version, filename in ORDERED_POSTGRES_MIGRATIONS:
+        expected_checksum = postgres_migration_checksum(filename)
+        existing_checksum = _migration_checksum_row(conn, version)
+        if existing_checksum is not None:
+            if existing_checksum != expected_checksum:
+                raise TransactionUnavailable(
+                    f"PostgreSQL migration checksum mismatch for {version}"
+                )
+            continue
+        conn.execute(load_postgres_migration_sql(filename))
+        if not _schema_migrations_table_exists(conn):
+            raise TransactionUnavailable(
+                f"PostgreSQL migration {version} did not create phigraph_schema_migrations"
+            )
+        conn.execute(
+            """
+            INSERT INTO phigraph_schema_migrations (version, checksum)
+            VALUES (%s, %s)
+            """,
+            (version, expected_checksum),
+        )
+        applied.append(version)
+    if verify:
+        verify_postgres_schema(conn)
+    return applied
 
 
 def verify_postgres_schema(conn: Any) -> None:
@@ -301,22 +366,17 @@ def verify_postgres_schema(conn: Any) -> None:
             "PostgreSQL scoped schema missing primary key on phigraph_schema_migrations.version"
         )
 
-    expected_checksum = scoped_ledger_migration_checksum()
-    version_row = conn.execute(
-        """
-        SELECT checksum FROM phigraph_schema_migrations
-        WHERE version = %s
-        """,
-        (SCOPED_LEDGER_MIGRATION_VERSION,),
-    ).fetchone()
-    if version_row is None:
-        raise TransactionUnavailable(
-            f"PostgreSQL scoped schema not migrated (missing {SCOPED_LEDGER_MIGRATION_VERSION})"
-        )
-    if version_row[0] != expected_checksum:
-        raise TransactionUnavailable(
-            f"PostgreSQL scoped schema migration checksum mismatch for {SCOPED_LEDGER_MIGRATION_VERSION}"
-        )
+    for version, filename in ORDERED_POSTGRES_MIGRATIONS:
+        expected_checksum = postgres_migration_checksum(filename)
+        stored_checksum = _migration_checksum_row(conn, version)
+        if stored_checksum is None:
+            raise TransactionUnavailable(
+                f"PostgreSQL scoped schema not migrated (missing {version})"
+            )
+        if stored_checksum != expected_checksum:
+            raise TransactionUnavailable(
+                f"PostgreSQL scoped schema migration checksum mismatch for {version}"
+            )
 
     _verify_table_columns(
         conn,
@@ -347,6 +407,20 @@ def verify_postgres_schema(conn: Any) -> None:
 def ensure_legacy_core_ledger_table(conn: Any) -> None:
     """Create legacy core ledger table for migration tests only."""
     conn.execute(_LEGACY_CORE_LEDGER_DDL)
+
+
+def bootstrap_postgres_scoped_schema(dsn: str) -> list[str]:
+    """Apply pending scoped PostgreSQL migrations without constructing EvidenceLedger.
+
+    Use before first service start on RC7 databases that only have migration 001,
+    or from admin/cutover scripts that must upgrade schema out-of-band.
+    """
+    import psycopg
+
+    with psycopg.connect(dsn) as conn:
+        applied = apply_postgres_migrations(conn)
+        conn.commit()
+    return applied
 
 
 def drop_postgres_scoped_schema(dsn: str) -> None:
