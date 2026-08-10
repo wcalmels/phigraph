@@ -35,8 +35,8 @@ Modules: `transactions.py`, `scoped_ledger.py`, `postgres_*.py`.
 | JSON | `transactional_mode=multiprocess` | `TransactionUnavailable` |
 | SQLite | multiprocess (8 workers) | one row per canonical key; linear chain |
 | SQLite | CAS (2 workers) | one winner; one `VersionConflict` |
-| PostgreSQL | multiprocess (8 workers) | **pending CI** (`postgres / Python 3.12`) |
-| PostgreSQL | CAS (2 workers) | **pending CI** |
+| PostgreSQL | multiprocess (8 workers) | one row per canonical key; linear chain (**CI validated**) |
+| PostgreSQL | CAS (2 workers) | one winner; one `VersionConflict` (**CI validated**) |
 
 ## PostgreSQL schema strategy
 

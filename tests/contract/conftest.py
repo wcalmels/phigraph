@@ -81,9 +81,3 @@ def postgres_ledger(postgres_dsn):
             """
         )
         conn.commit()
-
-
-def reset_postgres_scoped_schema(postgres_dsn: str) -> None:
-    from phigraph.core_v3.postgres_migrations import reset_postgres_scoped_schema as _reset
-
-    _reset(postgres_dsn)
