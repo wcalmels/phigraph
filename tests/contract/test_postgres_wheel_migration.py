@@ -34,7 +34,7 @@ def test_wheel_migration_sql_applies_on_postgres(built_wheel, postgres_dsn):
     subprocess.run([sys.executable, "-m", "venv", str(venv_dir)], check=True)
     pip = venv_dir / ("Scripts" if sys.platform == "win32" else "bin") / "pip"
     python = venv_dir / ("Scripts" if sys.platform == "win32" else "bin") / "python"
-    subprocess.run([str(pip), "install", f"{built_wheel}[postgres]"], check=True)
+    subprocess.run([str(pip), "install", f"{built_wheel}[postgres,benchmark]"], check=True)
     env = os.environ.copy()
     env["PHIGRAPH_POSTGRES_DSN"] = postgres_dsn
     script = (
