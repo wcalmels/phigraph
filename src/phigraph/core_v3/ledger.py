@@ -8,7 +8,7 @@ from pathlib import Path
 from threading import RLock
 from typing import Any, Callable
 
-from .backends import JsonLedgerBackend, LedgerBackend, SQLiteLedgerBackend
+from .backends import JsonLedgerBackend, LedgerBackend, PostgreSQLLedgerBackend, SQLiteLedgerBackend
 from .models import (
     ActionProposal,
     Claim,
@@ -18,6 +18,7 @@ from .models import (
     PolicyDecision,
     Verification,
 )
+from .postgres_scoped import migrate_legacy_scoped_postgres
 from .scoped_ledger import (
     ScopedLedgerEngine,
     ScopedTransactionSession,
@@ -470,3 +471,9 @@ class EvidenceLedger:
         if not isinstance(self.backend, SQLiteLedgerBackend):
             raise TransactionUnavailable("migrate_legacy_scoped_sqlite requires SQLite backend")
         return migrate_legacy_scoped_sqlite(self)
+
+    def migrate_legacy_scoped_postgres(self) -> dict[str, Any]:
+        """Explicit PostgreSQL migration from ``phigraph_core_ledger`` to scoped tables."""
+        if not isinstance(self.backend, PostgreSQLLedgerBackend):
+            raise TransactionUnavailable("migrate_legacy_scoped_postgres requires PostgreSQL backend")
+        return migrate_legacy_scoped_postgres(self)

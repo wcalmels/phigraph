@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import os
+
 import pytest
 
-from phigraph.core_v3.backends import SQLiteLedgerBackend
+from phigraph.core_v3.backends import PostgreSQLLedgerBackend, SQLiteLedgerBackend
 from phigraph.core_v3.ledger import EvidenceLedger
 
 
@@ -39,3 +41,43 @@ def sqlite_ledger(tmp_path):
         backend = SQLiteLedgerBackend(tmp_path / "ledger.db", EvidenceLedger.COLLECTIONS)
         return EvidenceLedger(backend=backend)
     return factory
+
+
+@pytest.fixture(scope="session")
+def postgres_dsn() -> str:
+    dsn = os.environ.get("PHIGRAPH_POSTGRES_DSN")
+    if not dsn:
+        pytest.skip("PHIGRAPH_POSTGRES_DSN not set")
+    pytest.importorskip("psycopg")
+    return dsn
+
+
+@pytest.fixture
+def postgres_ledger(postgres_dsn):
+    import psycopg
+
+    from phigraph.core_v3.postgres_migrations import apply_postgres_migrations
+
+    with psycopg.connect(postgres_dsn) as conn:
+        apply_postgres_migrations(conn)
+        conn.commit()
+
+    def factory() -> EvidenceLedger:
+        backend = PostgreSQLLedgerBackend(postgres_dsn, EvidenceLedger.COLLECTIONS)
+        return EvidenceLedger(backend=backend)
+
+    yield factory
+
+    with psycopg.connect(postgres_dsn) as conn:
+        conn.execute("TRUNCATE phigraph_scoped_ledger, phigraph_chain_heads RESTART IDENTITY")
+        conn.execute(
+            """
+            DO $$
+            BEGIN
+                IF to_regclass('public.phigraph_core_ledger') IS NOT NULL THEN
+                    EXECUTE 'TRUNCATE phigraph_core_ledger RESTART IDENTITY';
+                END IF;
+            END $$;
+            """
+        )
+        conn.commit()

@@ -12,7 +12,7 @@ from pathlib import Path
 from threading import RLock
 from typing import Any, Callable
 
-from .backends import JsonLedgerBackend, LedgerBackend, SQLiteLedgerBackend
+from .backends import JsonLedgerBackend, LedgerBackend, PostgreSQLLedgerBackend, SQLiteLedgerBackend
 from .transactions import (
     CHAIN_LINKED_COLLECTIONS,
     LEGACY_CANONICAL_KEY_FIELDS,
@@ -31,6 +31,7 @@ from .transactions import (
     chain_record_hash,
     extract_record_id,
     is_chain_linked_collection,
+    normalize_lock_refs,
     require_write_locks,
     validate_collection,
 )
@@ -253,7 +254,9 @@ class _ThreadTransactionState:
     tx_depth: int = 0
     active_json_state: _ScopedStoreState | None = None
     sqlite_conn: sqlite3.Connection | None = None
+    postgres_conn: Any | None = None
     lock_context: LockContext | None = None
+    lock_refs: tuple[Any, ...] | None = None
 
 
 class ScopedTransactionSession:
@@ -353,15 +356,21 @@ class ScopedLedgerEngine:
         self.transactional_mode = transactional_mode
         self._lock = RLock()
         self._thread_state = threading.local()
+        self._postgres: Any | None = None
         if isinstance(backend, JsonLedgerBackend):
             self._json_path = Path(str(backend.path) + ".scoped.json")
             if not self._json_path.exists():
                 self._write_json_state(_ScopedStoreState())
         elif isinstance(backend, SQLiteLedgerBackend):
             self._ensure_sqlite_schema()
-        elif backend.__class__.__name__ == "PostgreSQLLedgerBackend":
-            pass
+        elif isinstance(backend, PostgreSQLLedgerBackend):
+            from .postgres_scoped import PostgresScopedEngine
+
+            self._postgres = PostgresScopedEngine(
+                backend, self._tls, self._build_row
+            )
         else:
+            self._postgres = None
             raise TransactionUnavailable(f"Unsupported backend for scoped ledger: {type(backend)}")
 
     def _tls(self) -> _ThreadTransactionState:
@@ -546,6 +555,15 @@ class ScopedLedgerEngine:
             return self._sqlite_append(
                 collection, record, canonical_key=canonical_key,
                 tenant_id=tenant_id, project_id=project_id, once=once, chain_linked=linked,
+            )
+        if self._postgres is not None:
+            return self._postgres.append_scoped(
+                collection,
+                record,
+                canonical_key=canonical_key,
+                tenant_id=tenant_id,
+                project_id=project_id,
+                once=once,
             )
         raise TransactionUnavailable("Scoped append is not implemented for this backend")
 
@@ -783,6 +801,13 @@ class ScopedLedgerEngine:
             finally:
                 if close and conn is not None:
                     conn.close()
+        if self._postgres is not None:
+            return self._postgres.get_scoped(
+                collection,
+                canonical_key=canonical_key,
+                tenant_id=tenant_id,
+                project_id=project_id,
+            )
         raise TransactionUnavailable("Scoped get is not implemented for this backend")
 
     def _list_scoped(
@@ -829,6 +854,14 @@ class ScopedLedgerEngine:
             finally:
                 if close and conn is not None:
                     conn.close()
+        if self._postgres is not None:
+            return self._postgres.list_scoped(
+                collection,
+                tenant_id=tenant_id,
+                project_id=project_id,
+                limit=limit,
+                offset=offset,
+            )
         raise TransactionUnavailable("Scoped list is not implemented for this backend")
 
     def _compare_and_set_scoped(
@@ -864,6 +897,16 @@ class ScopedLedgerEngine:
             return self._sqlite_cas(
                 collection, record, canonical_key=canonical_key, tenant_id=tenant_id,
                 project_id=project_id, expected_version=expected_version,
+                expected_payload_hash=expected_payload_hash,
+            )
+        if self._postgres is not None:
+            return self._postgres.compare_and_set_scoped(
+                collection,
+                record,
+                canonical_key=canonical_key,
+                tenant_id=tenant_id,
+                project_id=project_id,
+                expected_row_version=expected_version,
                 expected_payload_hash=expected_payload_hash,
             )
         raise TransactionUnavailable("Scoped CAS is not implemented for this backend")
@@ -1002,11 +1045,13 @@ class ScopedLedgerEngine:
         tls = self._tls()
         if tls.tx_depth:
             raise TransactionUnavailable("nested scoped transactions are not supported")
-        lock_context = build_lock_context(lock_refs)
+        ordered = normalize_lock_refs(lock_refs)
+        lock_context = build_lock_context(ordered)
         if isinstance(self.backend, JsonLedgerBackend):
             with self._lock:
                 tls.tx_depth += 1
                 tls.lock_context = lock_context
+                tls.lock_refs = ordered
                 tls.active_json_state = copy.deepcopy(self._read_json_state())
                 session = ScopedTransactionSession(self, tenant_id, project_id)
                 try:
@@ -1017,6 +1062,7 @@ class ScopedLedgerEngine:
                     tls.tx_depth = 0
                     tls.active_json_state = None
                     tls.lock_context = None
+                    tls.lock_refs = None
         if isinstance(self.backend, SQLiteLedgerBackend):
             conn = self.backend._connect()
             conn.execute(f"PRAGMA busy_timeout = {SQLITE_BUSY_TIMEOUT_MS}")
@@ -1024,6 +1070,7 @@ class ScopedLedgerEngine:
             tls.sqlite_conn = conn
             tls.tx_depth += 1
             tls.lock_context = lock_context
+            tls.lock_refs = ordered
             session = ScopedTransactionSession(self, tenant_id, project_id)
             try:
                 result = fn(session)
@@ -1036,7 +1083,16 @@ class ScopedLedgerEngine:
                 tls.sqlite_conn = None
                 tls.tx_depth = 0
                 tls.lock_context = None
+                tls.lock_refs = None
                 conn.close()
+        if self._postgres is not None:
+            return self._postgres.run_scoped_transaction(
+                tenant_id,
+                project_id,
+                ordered,
+                fn,
+                lambda: ScopedTransactionSession(self, tenant_id, project_id),
+            )
         raise TransactionUnavailable("Scoped transactions are not implemented for this backend")
 
     def verify_scoped_chain(
@@ -1052,6 +1108,12 @@ class ScopedLedgerEngine:
         if isinstance(self.backend, SQLiteLedgerBackend):
             with self.backend._lock, self.backend._connect() as conn:
                 return self._verify_sqlite_conn(conn, tenant_id=tenant_id, project_id=project_id, collection=collection)
+        if self._postgres is not None:
+            return self._postgres.verify_scoped_chain(
+                tenant_id=tenant_id,
+                project_id=project_id,
+                collection=collection,
+            )
         raise TransactionUnavailable("Scoped chain verification is not implemented for this backend")
 
     def _verify_json_state(

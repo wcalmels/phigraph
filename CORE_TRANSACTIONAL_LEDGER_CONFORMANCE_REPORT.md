@@ -1,30 +1,31 @@
 # Core Transactional Ledger Conformance Report
 
-**Date:** 2026-08-09
-**Branch:** `feature/core-transactional-ledger-api-v1`
-**Core:** 4.1.0-rc.6
-**Protocol:** Transactional Ledger 0.1.0 (implementation candidate)
+**Date:** 2026-08-10
+**Branch:** `feature/core-transactional-ledger-postgres-v1`
+**Core:** 4.1.0-rc.7
+**Protocol:** Transactional Ledger 0.2.0
 
 ## Scope
 
-Public transactional API on `EvidenceLedger` for **JSON** (single-process) and **SQLite**
-(single-node multiprocess). PostgreSQL, GRDI service refactor, and
-`gateway_decision_events` are **out of scope** for this PR.
+Public transactional API on `EvidenceLedger` for **JSON**, **SQLite**, and **PostgreSQL**.
+GRDI service refactor, `gateway_decision_events`, HAV, connectors, and production deploy
+remain **out of scope** for this PR.
 
 ## Implemented API
 
-| Method | JSON | SQLite |
-|--------|------|--------|
-| `append_scoped` | yes | yes |
-| `append_scoped_once` | yes | yes |
-| `get_scoped` | yes | yes |
-| `list_scoped` | yes | yes |
-| `compare_and_set_scoped` | yes | yes |
-| `run_scoped_transaction` | yes | yes |
-| `verify_scoped_chain` | yes | yes |
-| `migrate_legacy_scoped_sqlite` | n/a | yes |
+| Method | JSON | SQLite | PostgreSQL |
+|--------|------|--------|------------|
+| `append_scoped` | yes | yes | yes |
+| `append_scoped_once` | yes | yes | yes |
+| `get_scoped` | yes | yes | yes |
+| `list_scoped` | yes | yes | yes |
+| `compare_and_set_scoped` | yes | yes | yes |
+| `run_scoped_transaction` | yes | yes | yes |
+| `verify_scoped_chain` | yes | yes | yes |
+| `migrate_legacy_scoped_sqlite` | n/a | yes | n/a |
+| `migrate_legacy_scoped_postgres` | n/a | n/a | yes |
 
-Module: `src/phigraph/core_v3/transactions.py`, `scoped_ledger.py`.
+Modules: `transactions.py`, `scoped_ledger.py`, `postgres_*.py`.
 
 ## Backend guarantees validated
 
@@ -34,36 +35,36 @@ Module: `src/phigraph/core_v3/transactions.py`, `scoped_ledger.py`.
 | JSON | `transactional_mode=multiprocess` | `TransactionUnavailable` |
 | SQLite | multiprocess (8 workers) | one row per canonical key; linear chain |
 | SQLite | CAS (2 workers) | one winner; one `VersionConflict` |
+| PostgreSQL | multiprocess (8 workers) | one row per canonical key; linear chain (**CI validated**) |
+| PostgreSQL | CAS (2 workers) | one winner; one `VersionConflict` (**CI validated**) |
 
-## SQLite legacy strategy
+## PostgreSQL schema strategy
 
-**Option B — explicit migration** (`EvidenceLedger.migrate_legacy_scoped_sqlite`):
+- Packaged migration: `src/phigraph/core_v3/sql/postgresql/001_scoped_ledger_v1.sql`
+- Repository mirror: `migrations/postgresql/` (must match packaged bytes)
+- Tests/CI: `apply_postgres_migrations(conn)` then commit
+- Application: `verify_postgres_schema(conn)` — catalog + checksum verification
+- Legacy cutover: `migrate_legacy_scoped_postgres()` reads `phigraph_core_ledger` only
 
-- Reads legacy `ledger` table rows for scoped GRDI collections
-- Audits duplicates; strict payload hash match or abort
-- Idempotent re-run skips hash-identical rows
-- Legacy table never modified or deleted
+## Advisory locks
+
+SHA-256 encoding → signed int32 pair for `pg_advisory_xact_lock`. Documented in ADR-021;
+deterministic vectors in `tests/contract/test_postgres_advisory.py`.
 
 ## Contract tests
 
-25 tests under `tests/contract/` including lock enforcement, thread-local isolation,
-CAS/chain separation, commit failure recovery, and tamper detection.
-
-## Regression
-
-- **287** total automated tests passing (262 baseline + 25 contract)
-- GRDIService unchanged
-- Legacy scoped methods preserved
+PostgreSQL tests under `tests/contract/test_transactional_postgres*.py`, schema verification,
+wheel migration smoke test, and advisory vectors. SQLite/JSON contract suite unchanged.
 
 ## Known limitations
 
-- PostgreSQL scoped backend not implemented
 - GRDI still uses legacy `_lock` / `register_scoped_record*` internally
-- CAS allowed only on mutable Core collections (standalone hashes, not chain-linked)
-- Chain-linked GRDI collections are append-only; CAS rejected on those collections
-- JSON backend has no cross-process safety (by design)
+- CAS allowed only on mutable Core collections (not chain-linked GRDI collections)
+- SQLite→PostgreSQL cross-backend import not implemented in this PR
+- Multinode production validation remains out of scope
 
 ## References
 
-- ADR-020 (JSON/SQLite marked IMPLEMENTED)
-- `CORE_TRANSACTIONAL_LEDGER_PROTOCOL_V1.md`
+- ADR-020 (contract)
+- ADR-021 (PostgreSQL)
+- `CORE_TRANSACTIONAL_LEDGER_PROTOCOL_V2.md`

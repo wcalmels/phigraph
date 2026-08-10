@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "phigraph-causal"
-version = "4.1.0-rc.6"
+version = "4.1.0-rc.7"
 description = "Governed relational intelligence, evidence and verification platform"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -53,6 +53,9 @@ phigraph-cyber-mvp = "phigraph.cyber_mvp.launcher:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.setuptools.package-data]
+"phigraph.core_v3" = ["sql/postgresql/*.sql"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
