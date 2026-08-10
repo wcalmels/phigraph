@@ -10,6 +10,7 @@ from phigraph.core_v3.postgres_migrations import (
     SCOPED_LEDGER_MIGRATION_VERSION,
     apply_postgres_migrations,
     load_scoped_ledger_migration_sql,
+    reset_postgres_scoped_schema,
     verify_postgres_schema,
 )
 from phigraph.core_v3.transactions import TransactionUnavailable
@@ -18,8 +19,6 @@ pytest.importorskip("psycopg")
 
 
 def _reset_scoped_schema(postgres_dsn: str) -> None:
-    from tests.contract.conftest import reset_postgres_scoped_schema
-
     reset_postgres_scoped_schema(postgres_dsn)
 
 
@@ -36,8 +35,6 @@ def test_root_migration_matches_package_sql() -> None:
 
 def test_apply_migrations_idempotent(postgres_dsn):
     import psycopg
-
-    from tests.contract.conftest import reset_postgres_scoped_schema
 
     reset_postgres_scoped_schema(postgres_dsn)
     with psycopg.connect(postgres_dsn) as conn:
