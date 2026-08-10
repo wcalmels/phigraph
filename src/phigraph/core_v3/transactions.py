@@ -17,10 +17,20 @@ SCOPED_COLLECTIONS = frozenset({
     "authority_decisions",
     "execution_requests",
     "gateway_decisions",
+    "gateway_decision_events",
     "shadow_execution_receipts",
     "shadow_outcomes",
     "replay_reports",
     "historical_comparisons",
+})
+
+LEGACY_MIGRATABLE_SCOPED_COLLECTIONS = frozenset(
+    collection for collection in SCOPED_COLLECTIONS if collection != "gateway_decision_events"
+)
+
+GATEWAY_DECISION_EVENT_TYPES = frozenset({
+    "GATEWAY_DECISION_CREATED",
+    "SIMULATION_RECORDED",
 })
 
 CAS_ALLOWED_COLLECTIONS = frozenset({
@@ -40,6 +50,7 @@ COLLECTION_RECORD_ID_KEYS: dict[str, str] = {
     "authority_decisions": "authority_decision_id",
     "execution_requests": "plan_id",
     "gateway_decisions": "gateway_decision_id",
+    "gateway_decision_events": "event_id",
     "shadow_execution_receipts": "receipt_id",
     "shadow_outcomes": "outcome_id",
     "replay_reports": "replay_id",
@@ -62,6 +73,12 @@ LEGACY_CANONICAL_KEY_FIELDS: dict[str, str] = {
     "replay_reports": "manifest_hash",
     "historical_comparisons": "comparison_key",
 }
+
+
+def gateway_event_canonical_key(plan_id: str, event_type: str) -> str:
+    if event_type not in GATEWAY_DECISION_EVENT_TYPES:
+        raise ValueError(f"unsupported gateway decision event type: {event_type}")
+    return f"{plan_id}:{event_type}"
 
 
 class LedgerError(Exception):

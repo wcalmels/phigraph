@@ -10,9 +10,14 @@ from pathlib import Path
 import pytest
 
 from phigraph.core_v3.postgres_migrations import (
+    GATEWAY_EVENTS_MIGRATION_FILENAME,
+    ORDERED_POSTGRES_MIGRATIONS,
     SCOPED_LEDGER_MIGRATION_VERSION,
     drop_postgres_scoped_schema,
+    gateway_events_migration_checksum,
+    load_gateway_events_migration_sql,
     load_scoped_ledger_migration_sql,
+    normalize_migration_sql,
     reset_postgres_scoped_schema,
     scoped_ledger_migration_checksum,
     verify_postgres_schema,
@@ -39,11 +44,18 @@ def test_wheel_packages_scoped_migration_sql(built_wheel: Path) -> None:
     with zipfile.ZipFile(built_wheel) as archive:
         names = archive.namelist()
         assert "phigraph/core_v3/sql/postgresql/001_scoped_ledger_v1.sql" in names
+        assert "phigraph/core_v3/sql/postgresql/002_gateway_decision_events.sql" in names
         packaged = archive.read(
             "phigraph/core_v3/sql/postgresql/001_scoped_ledger_v1.sql"
         ).decode("utf-8")
-    assert packaged == load_scoped_ledger_migration_sql()
-    assert hashlib.sha256(packaged.encode("utf-8")).hexdigest() == scoped_ledger_migration_checksum()
+    packaged_lf = normalize_migration_sql(packaged)
+    assert hashlib.sha256(packaged_lf.encode("utf-8")).hexdigest() == scoped_ledger_migration_checksum()
+    with zipfile.ZipFile(built_wheel) as archive:
+        packaged_002 = archive.read(
+            "phigraph/core_v3/sql/postgresql/002_gateway_decision_events.sql"
+        ).decode("utf-8")
+    packaged_002_lf = normalize_migration_sql(packaged_002)
+    assert hashlib.sha256(packaged_002_lf.encode("utf-8")).hexdigest() == gateway_events_migration_checksum()
 
 
 def test_wheel_apply_postgres_migrations(postgres_dsn: str, built_wheel: Path) -> None:
@@ -88,7 +100,7 @@ def test_wheel_installed_module_loads_migration_sql(
     env["PHIGRAPH_POSTGRES_DSN"] = postgres_dsn
     smoke_script = Path(__file__).with_name("_wheel_migration_smoke.py")
     result = subprocess.run(
-        [str(python), str(smoke_script), scoped_ledger_migration_checksum()],
+        [str(python), str(smoke_script), scoped_ledger_migration_checksum(), gateway_events_migration_checksum()],
         check=False,
         capture_output=True,
         text=True,
@@ -96,5 +108,5 @@ def test_wheel_installed_module_loads_migration_sql(
     )
     if result.returncode != 0:
         pytest.fail(result.stderr or result.stdout)
-    assert result.stdout.strip() == "1"
+    assert result.stdout.strip() == str(len(ORDERED_POSTGRES_MIGRATIONS))
     reset_postgres_scoped_schema(postgres_dsn)

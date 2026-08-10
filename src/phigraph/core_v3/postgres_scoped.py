@@ -19,6 +19,7 @@ from .scoped_ledger import (
 from .transactions import (
     CHAIN_LINKED_COLLECTIONS,
     LEGACY_CANONICAL_KEY_FIELDS,
+    LEGACY_MIGRATABLE_SCOPED_COLLECTIONS,
     MAX_LIST_LIMIT,
     SCOPED_COLLECTIONS,
     CompareAndSetResult,
@@ -724,7 +725,7 @@ def migrate_legacy_scoped_postgres(ledger: Any, *, conn: Any | None = None) -> d
     if own_conn:
         conn = backend._connect()
     try:
-        for coll in SCOPED_COLLECTIONS:
+        for coll in LEGACY_MIGRATABLE_SCOPED_COLLECTIONS:
             rows = conn.execute(
                 """
                 SELECT payload FROM phigraph_core_ledger

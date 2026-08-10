@@ -22,6 +22,7 @@ from .postgres_scoped import migrate_legacy_scoped_postgres
 from .scoped_ledger import (
     ScopedLedgerEngine,
     ScopedTransactionSession,
+    migrate_legacy_scoped_json,
     migrate_legacy_scoped_sqlite,
 )
 from .transactions import (
@@ -49,6 +50,7 @@ class EvidenceLedger:
         "authority_decisions",
         "execution_requests",
         "gateway_decisions",
+        "gateway_decision_events",
         "shadow_execution_receipts",
         "shadow_outcomes",
         "replay_reports",
@@ -477,3 +479,9 @@ class EvidenceLedger:
         if not isinstance(self.backend, PostgreSQLLedgerBackend):
             raise TransactionUnavailable("migrate_legacy_scoped_postgres requires PostgreSQL backend")
         return migrate_legacy_scoped_postgres(self)
+
+    def migrate_legacy_scoped_json(self) -> dict[str, Any]:
+        """Explicit JSON migration from main ledger file to scoped sidecar store."""
+        if not isinstance(self.backend, JsonLedgerBackend):
+            raise TransactionUnavailable("migrate_legacy_scoped_json requires JSON backend")
+        return migrate_legacy_scoped_json(self)

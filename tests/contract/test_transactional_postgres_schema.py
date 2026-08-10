@@ -7,10 +7,17 @@ import pytest
 from phigraph.core_v3.backends import PostgreSQLLedgerBackend
 from phigraph.core_v3.ledger import EvidenceLedger
 from phigraph.core_v3.postgres_migrations import (
+    GATEWAY_EVENTS_MIGRATION_VERSION,
+    ORDERED_POSTGRES_MIGRATIONS,
     SCOPED_LEDGER_MIGRATION_VERSION,
     apply_postgres_migrations,
     drop_postgres_scoped_schema,
+    gateway_events_migration_checksum,
+    load_gateway_events_migration_sql,
+    load_postgres_migration_sql,
     load_scoped_ledger_migration_sql,
+    normalize_migration_sql,
+    postgres_migration_checksum,
     reset_postgres_scoped_schema,
     verify_postgres_schema,
 )
@@ -31,7 +38,8 @@ def test_root_migration_matches_package_sql() -> None:
         / "001_scoped_ledger_v1.sql"
     )
     packaged = load_scoped_ledger_migration_sql()
-    assert root.read_text(encoding="utf-8") == packaged
+    root_sql = normalize_migration_sql(root.read_bytes().decode("utf-8"))
+    assert root_sql == packaged
 
 
 def test_apply_migrations_idempotent(postgres_dsn):
@@ -43,7 +51,7 @@ def test_apply_migrations_idempotent(postgres_dsn):
         conn.commit()
         verify_postgres_schema(conn)
         second = apply_postgres_migrations(conn)
-        assert first == [SCOPED_LEDGER_MIGRATION_VERSION]
+        assert first == [version for version, _ in ORDERED_POSTGRES_MIGRATIONS]
         assert second == []
     reset_postgres_scoped_schema(postgres_dsn)
 
@@ -216,3 +224,60 @@ def test_postgres_engine_rejects_unmigrated_schema(postgres_dsn):
     with psycopg.connect(postgres_dsn) as conn:
         apply_postgres_migrations(conn)
         conn.commit()
+
+
+def test_root_migration_002_matches_package_sql() -> None:
+    root = (
+        Path(__file__).resolve().parents[2]
+        / "migrations"
+        / "postgresql"
+        / "002_gateway_decision_events.sql"
+    )
+    packaged = load_gateway_events_migration_sql()
+    root_sql = normalize_migration_sql(root.read_bytes().decode("utf-8"))
+    assert root_sql == packaged
+
+
+def test_upgrade_from_001_only_applies_002(postgres_dsn):
+    import psycopg
+
+    drop_postgres_scoped_schema(postgres_dsn)
+    with psycopg.connect(postgres_dsn) as conn:
+        conn.execute(load_postgres_migration_sql("001_scoped_ledger_v1.sql"))
+        conn.execute(
+            """
+            INSERT INTO phigraph_schema_migrations (version, checksum)
+            VALUES (%s, %s)
+            """,
+            (SCOPED_LEDGER_MIGRATION_VERSION, postgres_migration_checksum("001_scoped_ledger_v1.sql")),
+        )
+        conn.commit()
+        applied = apply_postgres_migrations(conn)
+        conn.commit()
+        verify_postgres_schema(conn)
+        assert applied == [GATEWAY_EVENTS_MIGRATION_VERSION]
+    reset_postgres_scoped_schema(postgres_dsn)
+
+
+def test_verify_schema_missing_gateway_events_in_index(postgres_dsn):
+    import psycopg
+
+    with psycopg.connect(postgres_dsn) as conn:
+        apply_postgres_migrations(conn)
+        conn.execute("DROP INDEX IF EXISTS uq_scoped_chain_sequence_linked")
+        conn.execute(
+            """
+            CREATE UNIQUE INDEX uq_scoped_chain_sequence_linked
+            ON phigraph_scoped_ledger (tenant_id, project_id, collection, chain_sequence)
+            WHERE collection IN (
+                'decision_envelopes', 'authority_decisions', 'execution_requests',
+                'gateway_decisions', 'shadow_execution_receipts', 'shadow_outcomes',
+                'replay_reports', 'historical_comparisons'
+            )
+            """
+        )
+        conn.commit()
+    with psycopg.connect(postgres_dsn) as conn:
+        with pytest.raises(TransactionUnavailable, match="gateway_decision_events"):
+            verify_postgres_schema(conn)
+    _reset_scoped_schema(postgres_dsn)
