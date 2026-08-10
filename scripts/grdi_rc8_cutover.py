@@ -12,7 +12,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Iterator
 from urllib.parse import unquote, urlparse
@@ -31,7 +31,7 @@ DEFAULT_BACKUP_MAX_AGE_HOURS = 24
 
 
 def utc_now_iso() -> str:
-    return datetime.now(UTC).replace(microsecond=0).isoformat()
+    return datetime.now(timezone.utc).replace(microsecond=0).isoformat()
 
 
 def tool_git_commit() -> str:
@@ -130,7 +130,8 @@ def read_only_connection(dsn: str) -> Iterator[Any]:
     import psycopg
 
     with psycopg.connect(dsn) as conn:
-        with conn.transaction(readonly=True):
+        with conn.transaction():
+            conn.execute("SET TRANSACTION READ ONLY")
             yield conn
 
 
@@ -347,11 +348,11 @@ def validate_backup_file(
     created_raw = manifest.get("backup_created_at")
     if created_raw:
         created_at = datetime.fromisoformat(str(created_raw).replace("Z", "+00:00"))
-        if datetime.now(UTC) - created_at.astimezone(UTC) > timedelta(hours=max_age_hours):
+        if datetime.now(timezone.utc) - created_at.astimezone(timezone.utc) > timedelta(hours=max_age_hours):
             print(f"backup exceeds max age of {max_age_hours} hours", file=sys.stderr)
             raise SystemExit(EXIT_PRECONDITION)
     else:
-        age_hours = (datetime.now(UTC).timestamp() - backup_path.stat().st_mtime) / 3600.0
+        age_hours = (datetime.now(timezone.utc).timestamp() - backup_path.stat().st_mtime) / 3600.0
         if age_hours > max_age_hours:
             print(f"backup file mtime exceeds max age of {max_age_hours} hours", file=sys.stderr)
             raise SystemExit(EXIT_PRECONDITION)

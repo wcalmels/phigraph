@@ -143,7 +143,7 @@ py -3 scripts/grdi_rc8_cutover.py --check-only --output (Join-Path $ReportDir '0
 
 Garantías técnicas de `--check-only`:
 
-- Transacción PostgreSQL **`READ ONLY`** (`conn.transaction(readonly=True)`) para todo inventario SQL.
+- Transacción PostgreSQL **`READ ONLY`** (`SET TRANSACTION READ ONLY` en cada conexión de inventario).
 - **No** importa ni invoca funciones mutantes (`bootstrap_*`, `cutover_*`, `backfill_*`).
 - **No** construye `EvidenceLedger` hasta confirmar RC8 completo (`002` + checksum válido); evita auto-migración del constructor.
 - Si RC7 solo tiene `001`, `checks.schema = NOT_EVALUATED` y verificación de cadenas se omite.

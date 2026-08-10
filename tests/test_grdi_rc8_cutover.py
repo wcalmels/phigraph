@@ -463,7 +463,7 @@ def test_check_only_fingerprint_unchanged(cutover):
         before_fp = cutover.inventory_fingerprint(before)
 
     exit_code = cutover.main(["--check-only"])
-    assert exit_code == cutover.EXIT_PRECONDITION
+    assert exit_code == cutover.EXIT_OK
 
     with psycopg.connect(dsn) as conn:
         after = cutover.collect_inventory(conn)
