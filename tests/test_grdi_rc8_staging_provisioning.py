@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 import subprocess
 import sys
@@ -105,7 +106,7 @@ def test_env_staging_is_gitignored_but_example_is_tracked() -> None:
         check=False,
     )
     assert ignored_real.returncode == 0, ignored_real.stderr or ignored_real.stdout
-    assert "!" not in ignored_real.stdout.split(":", 1)[0]
+    assert "deploy/staging/.env.staging.example" not in ignored_real.stdout
 
     ignored_example = subprocess.run(
         ["git", "check-ignore", "-v", "deploy/staging/.env.staging.example"],
@@ -114,8 +115,12 @@ def test_env_staging_is_gitignored_but_example_is_tracked() -> None:
         text=True,
         check=False,
     )
-    # Negation rule makes the example trackable even if check-ignore reports a match line.
-    assert "!deploy/staging/.env.staging.example" in ignored_example.stdout
+    # Linux: exit 1 = not ignored (trackable). Windows may report negation rule with exit 0.
+    trackable = (
+        ignored_example.returncode != 0
+        or "!deploy/staging/.env.staging.example" in ignored_example.stdout
+    )
+    assert trackable
 
 
 def test_runbooks_document_exact_commits_and_postgres_16_14() -> None:
@@ -205,9 +210,18 @@ def test_fixture_script_rejects_wrong_confirmation(monkeypatch: pytest.MonkeyPat
 
 @pytest.mark.skipif(which("docker") is None, reason="docker not available")
 def test_docker_compose_config_valid() -> None:
+    env = os.environ.copy()
+    env.update(
+        {
+            "POSTGRES_DB": "phigraph_staging_compose_test",
+            "POSTGRES_USER": "phigraph_staging_compose_test",
+            "POSTGRES_PASSWORD": "compose-config-placeholder-not-a-secret",
+        }
+    )
     completed = subprocess.run(
         ["docker", "compose", "-f", str(COMPOSE_FILE), "config"],
         cwd=REPO_ROOT,
+        env=env,
         capture_output=True,
         text=True,
         check=False,

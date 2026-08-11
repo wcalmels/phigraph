@@ -108,7 +108,12 @@ jobs:
           sudo apt-get install -y shellcheck
           sudo snap install powershell --classic
       - name: Validate staging compose
-        run: docker compose -f deploy/staging/docker-compose.grdi-cutover.yml config
+        working-directory: deploy/staging
+        env:
+          POSTGRES_DB: phigraph_staging_ci
+          POSTGRES_USER: phigraph_staging_ci
+          POSTGRES_PASSWORD: ci-compose-config-placeholder
+        run: docker compose -f docker-compose.grdi-cutover.yml config
       - name: shellcheck preflight
         run: shellcheck deploy/staging/preflight.sh
       - name: Parse operator preflight PowerShell
