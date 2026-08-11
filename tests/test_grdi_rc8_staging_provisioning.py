@@ -183,6 +183,7 @@ def test_fixture_script_requires_staging_confirmation_and_avoids_rc8_bootstrap()
     assert "inventory_fingerprint" in text
     assert "payload_hash" in text
     assert "from phigraph.grdi import" not in text
+    assert "import GATEWAY_EVENTS_MIGRATION_VERSION" not in text
     assert "tests.grdi_rc7_legacy_fixtures" not in text
     assert not re.search(r"['\"]--apply['\"]", text)
     assert "phigraph_core_ledger" in text

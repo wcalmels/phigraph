@@ -208,16 +208,13 @@ def _partial_chain_index_predicate(conn: Any) -> str | None:
 
 
 def assert_rc7_schema_invariants(conn: Any, *, phase: str) -> dict[str, Any]:
-    from phigraph.core_v3.postgres_migrations import (
-        GATEWAY_EVENTS_MIGRATION_VERSION,
-        SCOPED_LEDGER_MIGRATION_VERSION,
-        scoped_ledger_migration_checksum,
-    )
+    # Migration 002 version id is a module constant so this helper works under RC7 runtime.
+    from phigraph.core_v3.postgres_migrations import scoped_ledger_migration_checksum
 
     expected_checksum = scoped_ledger_migration_checksum()
     row = conn.execute(
         "SELECT version, checksum FROM phigraph_schema_migrations WHERE version = %s",
-        (SCOPED_LEDGER_MIGRATION_VERSION,),
+        (MIGRATION_001,),
     ).fetchone()
     if row is None:
         _fail(f"{phase}: migration {MIGRATION_001} missing")
@@ -227,7 +224,7 @@ def assert_rc7_schema_invariants(conn: Any, *, phase: str) -> dict[str, Any]:
 
     if conn.execute(
         "SELECT version FROM phigraph_schema_migrations WHERE version = %s",
-        (GATEWAY_EVENTS_MIGRATION_VERSION,),
+        (MIGRATION_002,),
     ).fetchone():
         _fail(f"{phase}: migration {MIGRATION_002} must not be applied")
 
