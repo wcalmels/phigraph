@@ -195,6 +195,22 @@ Validar healthcheck y que **no** hay bind `0.0.0.0:5432`:
 ss -ltn | grep 5432 || true
 ```
 
+Crear marcador server-side de entorno (una sola fila; el fixture **no** lo modifica):
+
+```bash
+psql "$PHIGRAPH_POSTGRES_DSN" -f deploy/staging/sql/001_environment_metadata.sql
+psql "$PHIGRAPH_POSTGRES_DSN" -c "
+INSERT INTO phigraph_environment_metadata (environment, environment_id, fixture_loading_allowed)
+VALUES ('staging', gen_random_uuid(), true);"
+```
+
+Tras cutover o promoción a producción, revocar fixture loading:
+
+```bash
+psql "$PHIGRAPH_POSTGRES_DSN" -c "
+UPDATE phigraph_environment_metadata SET fixture_loading_allowed = false;"
+```
+
 ---
 
 ## 11. Preflight VPS (read-only)
@@ -327,10 +343,10 @@ Archivar en `evidence_directory`:
 | `GRDI_RC7_STAGING_BASELINE_RUNBOOK.md` | Baseline reproducible |
 | `examples/grdi_rc8_staging_environment.example.json` | Manifiesto infra |
 
-**Puertos publicados (compose GRDI):** solo `127.0.0.1:5432→5432` (túnel SSH). Nunca `0.0.0.0`. UFW no abre 5432. Conexión remota solo vía `ssh -L`. Producción fuera de alcance.  
-**Volúmenes:** `phigraph-grdi-cutover-pgdata`.  
-**Healthcheck:** `pg_isready`.  
-**Usuario contenedor:** postgres (imagen oficial).  
+**Puertos publicados (compose GRDI):** solo `127.0.0.1:5432→5432` (túnel SSH). Nunca `0.0.0.0`. UFW no abre 5432. Conexión remota solo vía `ssh -L`. Producción fuera de alcance.
+**Volúmenes:** `phigraph-grdi-cutover-pgdata`.
+**Healthcheck:** `pg_isready`.
+**Usuario contenedor:** postgres (imagen oficial).
 **Auto-migración:** `EvidenceLedger` / `CoreV3Service` **no** migran al init; riesgo RC8 es invocar `bootstrap_postgres_scoped_schema` explícitamente o `--apply` antes de backup.
 
 ---

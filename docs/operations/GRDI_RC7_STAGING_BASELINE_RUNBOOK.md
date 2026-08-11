@@ -2,7 +2,7 @@
 
 Construir una base PostgreSQL **realmente RC7** para ejercicios de cutover RC7→RC8 en staging.
 
-**Estado explícito:** `STAGING = NOT_PROVISIONED` hasta que un operador ejecute estos pasos en un VPS.  
+**Estado explícito:** `STAGING = NOT_PROVISIONED` hasta que un operador ejecute estos pasos en un VPS.
 **No arrancar RC8 primero:** el código RC8 aplicaría migración `002` automáticamente vía `bootstrap_postgres_scoped_schema` / `EvidenceLedger.ensure_postgres_scoped_migrations`.
 
 | Baseline RC7 | Target RC8 |
@@ -125,19 +125,42 @@ psql "$PHIGRAPH_POSTGRES_DSN" -c "SELECT COUNT(*) FROM phigraph_scoped_ledger;"
 
 ---
 
-## 6. Fixtures sintéticos RC7
+## 6. Fixtures sintéticos RC7 (payloads congelados)
 
-Usar el script operativo (inserta filas legacy vía psycopg; **no** construye `EvidenceLedger` ni `CoreV3Service`):
+El loader operativo inserta filas legacy desde `scripts/data/grdi_rc7_staging_fixture_rows.json`
+(generados en `44ba1cc` con GRDI `0.4.0`). **No** importa modelos `phigraph.grdi` en runtime RC8.
 
-Desde checkout RC8 (`d309c6f`) con baseline schema 001 + `phigraph_core_ledger` ya creado:
+Precondiciones server-side (creadas en provisioning, no por el fixture):
+
+```bash
+psql "$PHIGRAPH_POSTGRES_DSN" -f deploy/staging/sql/001_environment_metadata.sql
+psql "$PHIGRAPH_POSTGRES_DSN" -c "
+INSERT INTO phigraph_environment_metadata (environment, environment_id, fixture_loading_allowed)
+VALUES ('staging', gen_random_uuid(), true);"
+```
+
+Instalar paquete RC7 para ejecutar el loader (worktree `44ba1cc`):
+
+```bash
+cd "$RC7_WORKTREE"
+python3.12 -m venv .venv-fixture
+source .venv-fixture/bin/activate
+pip install -e ".[postgres,api]"
+git rev-parse HEAD   # must print RC7_SHA
+python -c "from phigraph.version import CORE_VERSION, GRDI_VERSION; assert CORE_VERSION=='4.1.0-rc.7' and GRDI_VERSION=='0.4.0'"
+```
+
+Desde checkout RC8 (`d309c6f`) con schema 001 + marcador staging válido:
 
 ```bash
 export PHIGRAPH_ENVIRONMENT=staging
-export PHIGRAPH_RECEIPT_SIGNING_KEY='REPLACE_WITH_STAGING_KEY'
+export PHIGRAPH_RECEIPT_SIGNING_KEY='grdi-rc7-staging-fixture-key-v1'
 export PHIGRAPH_POSTGRES_DSN='postgresql://...'
 
-python3.12 scripts/create_grdi_rc7_staging_fixture.py --confirm-fixture GRDI-RC7-STAGING
+"$RC7_WORKTREE/.venv-fixture/bin/python" scripts/create_grdi_rc7_staging_fixture.py --confirm-fixture GRDI-RC7-STAGING
 ```
+
+El script **rechaza** runtime GRDI `0.5.0` / Core `4.1.0-rc.8` antes de insertar.
 
 Casos mínimos insertados (legacy `phigraph_core_ledger`):
 
@@ -150,7 +173,7 @@ Casos mínimos insertados (legacy `phigraph_core_ledger`):
 
 El script es idempotente por **fallo explícito** si el marcador `requested_by=grdi-rc7-staging-fixture` ya existe.
 
-Registrar salida JSON (conteos + `inventory_fingerprint`) en el directorio de evidencia.
+Registrar salida JSON (`inventory_fingerprint`, `canonical_rows`, `environment_id`) en evidencia.
 
 ---
 
@@ -158,8 +181,8 @@ Registrar salida JSON (conteos + `inventory_fingerprint`) en el directorio de ev
 
 ```bash
 psql "$PHIGRAPH_POSTGRES_DSN" -c "
-SELECT tenant_id, project_id, collection, COUNT(*) 
-FROM phigraph_core_ledger 
+SELECT tenant_id, project_id, collection, COUNT(*)
+FROM phigraph_core_ledger
 GROUP BY 1,2,3 ORDER BY 1,2,3;"
 
 psql "$PHIGRAPH_POSTGRES_DSN" -c "SELECT COUNT(*) FROM phigraph_scoped_ledger;"

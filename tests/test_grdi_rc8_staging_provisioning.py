@@ -19,6 +19,8 @@ ENV_EXAMPLE = STAGING_DIR / ".env.staging.example"
 PREFLIGHT_SH = STAGING_DIR / "preflight.sh"
 OPERATOR_PS1 = STAGING_DIR / "operator-preflight.ps1"
 FIXTURE_SCRIPT = REPO_ROOT / "scripts" / "create_grdi_rc7_staging_fixture.py"
+FROZEN_PAYLOADS = REPO_ROOT / "scripts" / "data" / "grdi_rc7_staging_fixture_rows.json"
+ENVIRONMENT_METADATA_SQL = REPO_ROOT / "deploy" / "staging" / "sql" / "001_environment_metadata.sql"
 PROVISIONING_RUNBOOK = REPO_ROOT / "docs" / "operations" / "GRDI_RC8_STAGING_PROVISIONING_RUNBOOK.md"
 BASELINE_RUNBOOK = REPO_ROOT / "docs" / "operations" / "GRDI_RC7_STAGING_BASELINE_RUNBOOK.md"
 ENV_MANIFEST = REPO_ROOT / "docs" / "operations" / "examples" / "grdi_rc8_staging_environment.example.json"
@@ -172,11 +174,33 @@ def test_fixture_script_requires_staging_confirmation_and_avoids_rc8_bootstrap()
     assert "gateway_decision_events" in text
     assert "partial_chain_index_predicate" in text or "uq_scoped_chain_sequence_linked" in text
     assert "production" in text
+    assert "phigraph_environment_metadata" in text
+    assert "load_frozen_manifest" in text
+    assert "assert_rc7_runtime_package" in text
+    assert "inventory_fingerprint" in text
+    assert "payload_hash" in text
+    assert "from phigraph.grdi import" not in text
     assert "tests.grdi_rc7_legacy_fixtures" not in text
     assert not re.search(r"['\"]--apply['\"]", text)
     assert "phigraph_core_ledger" in text
     for forbidden in FORBIDDEN_FIXTURE_USAGE:
         assert forbidden not in text, forbidden
+
+
+def test_frozen_rc7_payload_manifest_exists_and_declares_rc7() -> None:
+    data = json.loads(_read(FROZEN_PAYLOADS))
+    assert data["core_version"] == "4.1.0-rc.7"
+    assert data["grdi_version"] == "0.4.0"
+    assert data["rc7_source_commit"] == RC7_COMMIT
+    assert data["expected_row_count"] == 18
+    assert len(data["rows"]) == 18
+
+
+def test_environment_metadata_sql_exists() -> None:
+    text = _read(ENVIRONMENT_METADATA_SQL)
+    assert "phigraph_environment_metadata" in text
+    assert "fixture_loading_allowed" in text
+    assert "environment_id" in text
 
 
 def test_fixture_script_rejects_production(monkeypatch: pytest.MonkeyPatch) -> None:
