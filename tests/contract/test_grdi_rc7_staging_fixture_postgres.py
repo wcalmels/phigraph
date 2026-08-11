@@ -44,6 +44,8 @@ _fixture = _fixture_module()
 GATEWAY_EVENTS_COLLECTION = _fixture.GATEWAY_EVENTS_COLLECTION
 assert_rc7_schema_invariants = _fixture.assert_rc7_schema_invariants
 load_frozen_manifest = _fixture.load_frozen_manifest
+verify_frozen_receipt_signatures = _fixture.verify_frozen_receipt_signatures
+FIXTURE_SIGNING_KEY = _fixture.FIXTURE_SIGNING_KEY
 
 
 def _drop_phigraph_schema(conn) -> None:
@@ -302,6 +304,38 @@ def test_fixture_rejects_staging_marker_without_fixture_permission(postgres_dsn:
     with psycopg.connect(postgres_dsn) as conn:
         legacy_count = conn.execute("SELECT COUNT(*) FROM phigraph_core_ledger").fetchone()
         assert legacy_count is not None and int(legacy_count[0]) == 0
+
+
+def test_frozen_receipts_verify_with_fixture_signing_key(frozen_manifest: dict) -> None:
+    verify_frozen_receipt_signatures(frozen_manifest, FIXTURE_SIGNING_KEY)
+
+
+def test_fixture_rejects_wrong_signing_key_before_connect(monkeypatch: pytest.MonkeyPatch) -> None:
+    import phigraph.version as version_module
+
+    monkeypatch.setattr(version_module, "CORE_VERSION", "4.1.0-rc.7")
+    monkeypatch.setattr(version_module, "GRDI_VERSION", "0.4.0")
+    monkeypatch.setenv("PHIGRAPH_ENVIRONMENT", "staging")
+    monkeypatch.setenv("PHIGRAPH_POSTGRES_DSN", "postgresql://unused:5432/db")
+    monkeypatch.setenv("PHIGRAPH_RECEIPT_SIGNING_KEY", "wrong-staging-key")
+
+    with pytest.raises(SystemExit) as exc_info:
+        _fixture.main(["--confirm-fixture", "GRDI-RC7-STAGING"])
+    assert exc_info.value.code != 0
+
+
+def test_fixture_rejects_placeholder_signing_key(monkeypatch: pytest.MonkeyPatch) -> None:
+    import phigraph.version as version_module
+
+    monkeypatch.setattr(version_module, "CORE_VERSION", "4.1.0-rc.7")
+    monkeypatch.setattr(version_module, "GRDI_VERSION", "0.4.0")
+    monkeypatch.setenv("PHIGRAPH_ENVIRONMENT", "staging")
+    monkeypatch.setenv("PHIGRAPH_POSTGRES_DSN", "postgresql://unused:5432/db")
+    monkeypatch.setenv("PHIGRAPH_RECEIPT_SIGNING_KEY", "REPLACE_WITH_STAGING_RECEIPT_SIGNING_KEY")
+
+    with pytest.raises(SystemExit) as exc_info:
+        _fixture.main(["--confirm-fixture", "GRDI-RC7-STAGING"])
+    assert exc_info.value.code != 0
 
 
 def test_fixture_rejects_grdi_05_runtime_before_insert(monkeypatch: pytest.MonkeyPatch) -> None:

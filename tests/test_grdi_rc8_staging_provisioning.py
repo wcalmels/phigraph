@@ -90,7 +90,8 @@ def test_env_example_is_placeholders_only() -> None:
     text = _read(ENV_EXAMPLE)
     assert "REPLACE_WITH_" in text
     assert "PHIGRAPH_ENVIRONMENT=staging" in text
-    assert "PHIGRAPH_RECEIPT_SIGNING_KEY=REPLACE_WITH_STAGING_RECEIPT_SIGNING_KEY" in text
+    assert "PHIGRAPH_RECEIPT_SIGNING_KEY=grdi-rc7-staging-fixture-key-v1" in text
+    assert "rc7-staging-fixture-v1" in text
     for pattern in SECRET_PATTERNS:
         assert not re.search(pattern, text, flags=re.IGNORECASE)
 
@@ -177,6 +178,8 @@ def test_fixture_script_requires_staging_confirmation_and_avoids_rc8_bootstrap()
     assert "phigraph_environment_metadata" in text
     assert "load_frozen_manifest" in text
     assert "assert_rc7_runtime_package" in text
+    assert "require_fixture_signing_key" in text
+    assert "verify_frozen_receipt_signatures" in text
     assert "inventory_fingerprint" in text
     assert "payload_hash" in text
     assert "from phigraph.grdi import" not in text
@@ -194,6 +197,9 @@ def test_frozen_rc7_payload_manifest_exists_and_declares_rc7() -> None:
     assert data["rc7_source_commit"] == RC7_COMMIT
     assert data["expected_row_count"] == 18
     assert len(data["rows"]) == 18
+    assert data["fixture_signing_key_label"] == "rc7-staging-fixture-v1"
+    assert data["fixture_signing_key_fingerprint"]
+    assert "signing_key_id" not in data
 
 
 def test_environment_metadata_sql_exists() -> None:

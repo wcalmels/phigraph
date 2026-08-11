@@ -33,6 +33,10 @@ RC7_GRDI_VERSION = "0.4.0"
 RC7_SOURCE_COMMIT = "44ba1cc08ee007183822b629f37ce00fd6a56db8"
 
 SIGNING_KEY = "grdi-rc7-staging-fixture-key-v1"
+FIXTURE_SIGNING_KEY_LABEL = "rc7-staging-fixture-v1"
+FIXTURE_SIGNING_KEY_FINGERPRINT = (
+    "1478acddace9283dac642925b9e657adf6ccddad2f2fe128b61a161e407ab5c2"
+)
 RC7_CREATED_AT = "2026-07-29T11:59:00+00:00"
 RC7_DECIDED_AT = "2026-07-29T12:00:00+00:00"
 RC7_SIMULATED_AT = "2026-07-29T12:01:00+00:00"
@@ -246,7 +250,8 @@ def main() -> int:
         "rc7_source_commit": RC7_SOURCE_COMMIT,
         "core_version": RC7_CORE_VERSION,
         "grdi_version": RC7_GRDI_VERSION,
-        "signing_key_id": SIGNING_KEY,
+        "fixture_signing_key_label": FIXTURE_SIGNING_KEY_LABEL,
+        "fixture_signing_key_fingerprint": FIXTURE_SIGNING_KEY_FINGERPRINT,
         "fixture_marker": MARKER,
         "expected_row_count": len(rows),
         "expected_plan_count": len(plans),

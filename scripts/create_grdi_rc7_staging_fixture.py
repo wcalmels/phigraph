@@ -33,10 +33,11 @@ ENVIRONMENT_METADATA_TABLE = "phigraph_environment_metadata"
 REPO_ROOT = Path(__file__).resolve().parents[1]
 FROZEN_PAYLOADS_PATH = REPO_ROOT / "scripts" / "data" / "grdi_rc7_staging_fixture_rows.json"
 
-TENANT_A = "tenant-a"
-TENANT_B = "tenant-b"
-PROJECT_A = "project-a"
-PROJECT_B = "project-b"
+FIXTURE_SIGNING_KEY = "grdi-rc7-staging-fixture-key-v1"  # nosec B105 — synthetic staging-only fixture key
+FIXTURE_SIGNING_KEY_LABEL = "rc7-staging-fixture-v1"
+FIXTURE_SIGNING_KEY_FINGERPRINT = (
+    "1478acddace9283dac642925b9e657adf6ccddad2f2fe128b61a161e407ab5c2"
+)
 
 
 def _fail(message: str, code: int = 2) -> None:
@@ -59,11 +60,43 @@ def require_dsn() -> str:
     return dsn
 
 
-def require_signing_key() -> str:
+def require_fixture_signing_key() -> str:
     key = os.environ.get("PHIGRAPH_RECEIPT_SIGNING_KEY", "").strip()
     if not key or key.startswith("REPLACE_WITH_"):
         _fail("PHIGRAPH_RECEIPT_SIGNING_KEY is required for staging fixtures")
+    if key != FIXTURE_SIGNING_KEY:
+        _fail(
+            "PHIGRAPH_RECEIPT_SIGNING_KEY must match the RC7 staging fixture synthetic key "
+            f"(label={FIXTURE_SIGNING_KEY_LABEL}); receipts would not verify otherwise"
+        )
     return key
+
+
+def verify_frozen_receipt_signatures(manifest: dict[str, Any], signing_key: str) -> None:
+    from phigraph.core_v3.receipts import ReceiptSigner
+
+    signer = ReceiptSigner.create(signing_key)
+    verified = 0
+    for row in manifest["rows"]:
+        payload = row["payload"]
+        hav_receipt = payload.get("hav_receipt")
+        if isinstance(hav_receipt, dict):
+            if not signer.verify(hav_receipt):
+                _fail(
+                    "frozen hav_receipt signature verification failed for "
+                    f"{row['collection']}:{row['record_id']}"
+                )
+            verified += 1
+        normalized_plan = payload.get("normalized_plan")
+        if isinstance(normalized_plan, dict) and "signature" in normalized_plan:
+            if not signer.verify(normalized_plan):
+                _fail(
+                    "frozen normalized_plan signature verification failed for "
+                    f"{row['collection']}:{row['record_id']}"
+                )
+            verified += 1
+    if verified == 0:
+        _fail("frozen manifest contains no verifiable receipt signatures")
 
 
 def assert_rc7_runtime_package() -> None:
@@ -124,6 +157,10 @@ def load_frozen_manifest() -> dict[str, Any]:
         _fail(f"frozen manifest grdi_version must be {RC7_GRDI_VERSION}")
     if manifest.get("rc7_source_commit") != RC7_SOURCE_COMMIT:
         _fail(f"frozen manifest rc7_source_commit must be {RC7_SOURCE_COMMIT}")
+    if manifest.get("fixture_signing_key_label") != FIXTURE_SIGNING_KEY_LABEL:
+        _fail(f"frozen manifest fixture_signing_key_label must be {FIXTURE_SIGNING_KEY_LABEL}")
+    if manifest.get("fixture_signing_key_fingerprint") != FIXTURE_SIGNING_KEY_FINGERPRINT:
+        _fail("frozen manifest fixture_signing_key_fingerprint mismatch")
     rows = manifest.get("rows")
     if not isinstance(rows, list) or not rows:
         _fail("frozen manifest rows must be a non-empty list")
@@ -390,8 +427,9 @@ def main(argv: list[str] | None = None) -> int:
     require_staging_environment()
     assert_rc7_runtime_package()
     manifest = load_frozen_manifest()
+    signing_key = require_fixture_signing_key()
+    verify_frozen_receipt_signatures(manifest, signing_key)
     dsn = require_dsn()
-    require_signing_key()
 
     try:
         import psycopg
@@ -423,6 +461,8 @@ def main(argv: list[str] | None = None) -> int:
         "rc7_invariants_before": invariants_before,
         "rc7_invariants_after": invariants_after,
         "environment_marker": environment_marker,
+        "fixture_signing_key_label": FIXTURE_SIGNING_KEY_LABEL,
+        "fixture_signing_key_fingerprint": FIXTURE_SIGNING_KEY_FINGERPRINT,
         "pii": False,
         "connectors": False,
         "repair_chain": False,

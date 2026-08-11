@@ -154,11 +154,13 @@ Desde checkout RC8 (`d309c6f`) con schema 001 + marcador staging válido:
 
 ```bash
 export PHIGRAPH_ENVIRONMENT=staging
-export PHIGRAPH_RECEIPT_SIGNING_KEY='grdi-rc7-staging-fixture-key-v1'
 export PHIGRAPH_POSTGRES_DSN='postgresql://...'
+export PHIGRAPH_RECEIPT_SIGNING_KEY='grdi-rc7-staging-fixture-key-v1'
 
 "$RC7_WORKTREE/.venv-fixture/bin/python" scripts/create_grdi_rc7_staging_fixture.py --confirm-fixture GRDI-RC7-STAGING
 ```
+
+El loader exige la clave sintética exacta del manifest (`fixture_signing_key_label=rc7-staging-fixture-v1`) y verifica criptográficamente los receipts congelados **antes** de conectar a PostgreSQL. Otra clave → rechazo.
 
 El script **rechaza** runtime GRDI `0.5.0` / Core `4.1.0-rc.8` antes de insertar.
 

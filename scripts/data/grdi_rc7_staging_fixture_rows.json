@@ -658,5 +658,6 @@
       "tenant_id": "tenant-b"
     }
   ],
-  "signing_key_id": "grdi-rc7-staging-fixture-key-v1"
+  "fixture_signing_key_fingerprint": "1478acddace9283dac642925b9e657adf6ccddad2f2fe128b61a161e407ab5c2",
+  "fixture_signing_key_label": "rc7-staging-fixture-v1"
 }

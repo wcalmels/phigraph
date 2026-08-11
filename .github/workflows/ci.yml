@@ -82,11 +82,30 @@ jobs:
           pip install -e ".[api,benchmark,dev,auth,app,postgres]"
       - name: Prepare RC7 interpreter for fixture loader
         run: |
+          rm -rf /tmp/phigraph-rc7 /tmp/rc7-fixture-venv
+          mkdir -p /tmp/phigraph-rc7
           git archive --format=tar 44ba1cc08ee007183822b629f37ce00fd6a56db8 | tar -x -C /tmp/phigraph-rc7
           python -m venv /tmp/rc7-fixture-venv
           /tmp/rc7-fixture-venv/bin/pip install --upgrade pip
           /tmp/rc7-fixture-venv/bin/pip install -e "/tmp/phigraph-rc7[postgres,dev,benchmark,api,app,auth]"
           echo "PHIGRAPH_FIXTURE_PYTHON=/tmp/rc7-fixture-venv/bin/python" >> "$GITHUB_ENV"
+      - name: Verify frozen RC7 manifest matches RC7 generator output
+        run: |
+          /tmp/rc7-fixture-venv/bin/python \
+            scripts/generate_grdi_rc7_staging_fixture_payloads.py \
+            > /tmp/generated-rc7-fixture.json
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          expected = json.loads(
+              Path("scripts/data/grdi_rc7_staging_fixture_rows.json").read_text(encoding="utf-8")
+          )
+          generated = json.loads(
+              Path("/tmp/generated-rc7-fixture.json").read_text(encoding="utf-8")
+          )
+          assert generated == expected, "committed RC7 fixture manifest differs from RC7 generator output"
+          PY
       - name: PostgreSQL contract tests
         run: |
           pytest tests/contract/test_postgres_advisory.py \
