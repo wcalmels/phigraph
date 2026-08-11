@@ -7,6 +7,7 @@ import json
 import os
 import subprocess
 import sys
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from unittest import mock
 
@@ -45,13 +46,25 @@ def dsn_env(monkeypatch):
     return dsn
 
 
-def _write_manifest(tmp_path: Path, dsn: str, backup_path: Path, backup_sha256: str, **extra: object) -> Path:
+def _utc_now_iso() -> str:
+    return datetime.now(timezone.utc).replace(microsecond=0).isoformat()
+
+
+def _write_manifest(
+    tmp_path: Path,
+    dsn: str,
+    backup_path: Path,
+    backup_sha256: str,
+    *,
+    backup_created_at: str | None = None,
+    **extra: object,
+) -> Path:
     manifest = {
         "operation_id": "test-cutover-001",
         "database_identity_hash": load_cutover_module().database_identity_hash(dsn),
         "backup_path": str(backup_path),
         "backup_sha256": backup_sha256,
-        "backup_created_at": "2026-08-10T16:00:00+00:00",
+        "backup_created_at": backup_created_at if backup_created_at is not None else _utc_now_iso(),
         **extra,
     }
     path = tmp_path / "manifest.json"
@@ -271,10 +284,23 @@ def test_bad_backup_checksum_exits_3(cutover, dsn_env, tmp_path, monkeypatch):
     _write_pgdmp_backup(backup, b"one")
     manifest_path = _write_manifest(tmp_path, dsn_env, backup, "f" * 64)
     manifest = cutover.load_backup_manifest(manifest_path)
+    created_at = datetime.fromisoformat(str(manifest["backup_created_at"]))
+    assert datetime.now(timezone.utc) - created_at.astimezone(timezone.utc) <= timedelta(hours=24)
     monkeypatch.setattr(cutover, "run_pg_restore_list", lambda _path: {"status": "VERIFIED"})
     with pytest.raises(SystemExit) as exc:
         cutover.validate_backup_file(manifest, dsn=dsn_env, max_age_hours=24)
     assert exc.value.code == cutover.EXIT_CONFLICT
+
+
+def test_stale_backup_exits_2(cutover, dsn_env, tmp_path):
+    backup = tmp_path / "backup.dump"
+    sha = _write_pgdmp_backup(backup)
+    stale_at = (datetime.now(timezone.utc) - timedelta(hours=25)).replace(microsecond=0).isoformat()
+    manifest_path = _write_manifest(tmp_path, dsn_env, backup, sha, backup_created_at=stale_at)
+    manifest = cutover.load_backup_manifest(manifest_path)
+    with pytest.raises(SystemExit) as exc:
+        cutover.validate_backup_file(manifest, dsn=dsn_env, max_age_hours=24)
+    assert exc.value.code == cutover.EXIT_PRECONDITION
 
 
 def test_empty_backup_exits_2(cutover, dsn_env, tmp_path):

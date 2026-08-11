@@ -1,0 +1,62 @@
+# Isolated PostgreSQL for GRDI RC7→RC8 staging cutover exercises.
+# Does NOT replace docker-compose.staging.yml (SQLite API/worker stack).
+#
+# Usage (operator VPS, after copying deploy/staging/.env.staging from .env.staging.example):
+#   docker compose -f deploy/staging/docker-compose.grdi-cutover.yml up -d
+#
+# PostgreSQL is NOT published on 0.0.0.0. Reach the DB via Docker network or SSH tunnel only.
+
+name: phigraph-grdi-cutover-staging
+
+services:
+  postgres:
+    # Official Docker Library manifest (multi-arch index, 2026-08-05):
+    # postgres:16.14-bookworm@sha256:64154d0babcb1741988719e703419af0382b19953706149f9872fbd0f438efa8
+    image: postgres:16.14-bookworm@sha256:64154d0babcb1741988719e703419af0382b19953706149f9872fbd0f438efa8
+    restart: unless-stopped
+    env_file:
+      - path: .env.staging
+        required: false
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:?set POSTGRES_DB in .env.staging}
+      POSTGRES_USER: ${POSTGRES_USER:?set POSTGRES_USER in .env.staging}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env.staging}
+      PGDATA: /var/lib/postgresql/data/pgdata
+    volumes:
+      - phigraph-grdi-cutover-pgdata:/var/lib/postgresql/data
+    networks:
+      - grdi_cutover_internal
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB || exit 1",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 20s
+    deploy:
+      resources:
+        limits:
+          cpus: "2.0"
+          memory: 2G
+    security_opt:
+      - no-new-privileges:true
+    read_only: true
+    tmpfs:
+      - /tmp
+      - /run/postgresql
+    # Optional localhost-only bind for operator tunneling on the VPS host itself.
+    # Remove this block if the operator uses only `docker exec` / internal network.
+    ports:
+      - "127.0.0.1:5432:5432"
+
+networks:
+  grdi_cutover_internal:
+    driver: bridge
+    internal: false
+
+volumes:
+  phigraph-grdi-cutover-pgdata:
+    name: phigraph-grdi-cutover-pgdata

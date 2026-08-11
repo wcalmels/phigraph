@@ -1,0 +1,36 @@
+{
+  "environment_id": "grdi-rc8-staging-example-001",
+  "provider": "REPLACE_WITH_VPS_PROVIDER",
+  "region": "REPLACE_WITH_REGION",
+  "created_at": null,
+  "operator": "REPLACE_WITH_OPERATOR_HANDLE",
+  "vps_spec": {
+    "os": "Ubuntu 24.04 LTS",
+    "vcpus_min": 2,
+    "ram_gb_min": 4,
+    "disk_gb_min": 40,
+    "disk_gb_recommended": 80
+  },
+  "os_version": "24.04",
+  "docker_version": null,
+  "postgres_version": "16.14",
+  "postgres_image": "postgres:16.14-bookworm",
+  "postgres_image_digest": "sha256:64154d0babcb1741988719e703419af0382b19953706149f9872fbd0f438efa8",
+  "python_version": "3.12",
+  "rc7_source_commit": "44ba1cc08ee007183822b629f37ce00fd6a56db8",
+  "rc8_target_commit": "d309c6f0d692752f2f54b912b764d71fb9de2e18",
+  "database_identity_hash": null,
+  "network_exposure": {
+    "postgres_public_0_0_0_0": false,
+    "api_bind": "127.0.0.1 or private network only",
+    "ssh": "key-only, no root direct login"
+  },
+  "firewall_state": "UFW default deny (documented, not provisioned here)",
+  "backup_location": "REPLACE_WITH_OFF_VOLUME_BACKUP_DIR",
+  "backup_sha256": null,
+  "evidence_directory": "REPLACE_WITH_EVIDENCE_DIR",
+  "secrets_present": false,
+  "status": "NOT_PROVISIONED",
+  "cutover_status": "NOT_EXECUTED",
+  "production_scope": "OUT_OF_SCOPE"
+}

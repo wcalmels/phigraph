@@ -25,6 +25,8 @@ jobs:
         python-version: ["3.10", "3.11", "3.12", "3.13"]
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
@@ -37,6 +39,8 @@ jobs:
         run: python scripts/publication_audit.py
       - name: Test
         run: pytest
+      - name: git diff --check
+        run: git diff --check origin/main...HEAD
       - name: Compile
         run: python -m compileall -q src tests
       - name: Verify safe defaults
@@ -50,7 +54,7 @@ jobs:
     timeout-minutes: 20
     services:
       postgres:
-        image: postgres:16
+        image: postgres:16.14-bookworm
         env:
           POSTGRES_USER: phigraph
           POSTGRES_PASSWORD: phigraph
@@ -66,6 +70,8 @@ jobs:
       PHIGRAPH_POSTGRES_DSN: postgresql://phigraph:phigraph@localhost:5432/phigraph_test
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
@@ -74,6 +80,32 @@ jobs:
         run: |
           python -m pip install --upgrade pip build
           pip install -e ".[api,benchmark,dev,auth,app,postgres]"
+      - name: Prepare RC7 interpreter for fixture loader
+        run: |
+          rm -rf /tmp/phigraph-rc7 /tmp/rc7-fixture-venv
+          mkdir -p /tmp/phigraph-rc7
+          git archive --format=tar 44ba1cc08ee007183822b629f37ce00fd6a56db8 | tar -x -C /tmp/phigraph-rc7
+          python -m venv /tmp/rc7-fixture-venv
+          /tmp/rc7-fixture-venv/bin/pip install --upgrade pip
+          /tmp/rc7-fixture-venv/bin/pip install -e "/tmp/phigraph-rc7[postgres,dev,benchmark,api,app,auth]"
+          echo "PHIGRAPH_FIXTURE_PYTHON=/tmp/rc7-fixture-venv/bin/python" >> "$GITHUB_ENV"
+      - name: Verify frozen RC7 manifest matches RC7 generator output
+        run: |
+          /tmp/rc7-fixture-venv/bin/python \
+            scripts/generate_grdi_rc7_staging_fixture_payloads.py \
+            > /tmp/generated-rc7-fixture.json
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          expected = json.loads(
+              Path("scripts/data/grdi_rc7_staging_fixture_rows.json").read_text(encoding="utf-8")
+          )
+          generated = json.loads(
+              Path("/tmp/generated-rc7-fixture.json").read_text(encoding="utf-8")
+          )
+          assert generated == expected, "committed RC7 fixture manifest differs from RC7 generator output"
+          PY
       - name: PostgreSQL contract tests
         run: |
           pytest tests/contract/test_postgres_advisory.py \
@@ -85,7 +117,47 @@ jobs:
             tests/contract/test_grdi_encapsulation.py \
             tests/contract/test_grdi_transactional_postgres.py \
             tests/contract/test_grdi_cutover_rc7.py \
+            tests/contract/test_grdi_rc7_staging_fixture_postgres.py \
             tests/test_grdi_rc8_cutover.py -v
+
+  staging-provisioning:
+    name: staging provisioning artifacts
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install Python tooling
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev,postgres]"
+      - name: Install shellcheck and PowerShell
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y shellcheck
+          sudo snap install powershell --classic
+      - name: Validate staging compose
+        working-directory: deploy/staging
+        env:
+          POSTGRES_DB: phigraph_staging_ci
+          POSTGRES_USER: phigraph_staging_ci
+          POSTGRES_PASSWORD: ci-compose-config-placeholder
+        run: docker compose -f docker-compose.grdi-cutover.yml config
+      - name: shellcheck preflight
+        run: shellcheck deploy/staging/preflight.sh
+      - name: Parse operator preflight PowerShell
+        run: |
+          pwsh -NoProfile -Command \
+            "[void][scriptblock]::Create((Get-Content deploy/staging/operator-preflight.ps1 -Raw))"
+      - name: Staging provisioning static tests
+        run: pytest tests/test_grdi_rc8_staging_provisioning.py -v
+      - name: git diff --check
+        run: git diff --check origin/main...HEAD
 
   package:
     runs-on: ubuntu-latest

@@ -1,0 +1,663 @@
+{
+  "core_version": "4.1.0-rc.7",
+  "expected_plan_count": 4,
+  "expected_row_count": 18,
+  "fixture": "grdi-rc7-staging",
+  "fixture_marker": "grdi-rc7-staging-fixture",
+  "grdi_version": "0.4.0",
+  "plans": {
+    "authorized": "ep_rc7_staging_001",
+    "simulated_with_receipt": "ep_rc7_staging_002",
+    "simulated_with_receipt_tenant_b": "ep_rc7_staging_004",
+    "simulated_without_receipt": "ep_rc7_staging_003"
+  },
+  "rc7_source_commit": "44ba1cc08ee007183822b629f37ce00fd6a56db8",
+  "rows": [
+    {
+      "collection": "decision_envelopes",
+      "payload": {
+        "authorization_state": "NOT_AUTHORIZED",
+        "claim_ids": [],
+        "created_at": "2026-07-29T11:59:00+00:00",
+        "decision_type": "promote_release",
+        "domain": "software",
+        "envelope_id": "de_rc7_staging_001",
+        "evidence_ids": [],
+        "executability_state": "NOT_EXECUTABLE",
+        "execution_state": "NOT_EXECUTED",
+        "graph_context": {},
+        "hav_receipt": {
+          "governance": {
+            "execution_authorized": false,
+            "project_id": "project-a",
+            "tenant_id": "tenant-a"
+          },
+          "output_hash": "rc7staging0001",
+          "receipt_id": "hav_rc7_tenant-a_project-a",
+          "signature": {
+            "alg": "hmac-sha256",
+            "key_id": "core-v3-default",
+            "value": "f67e612ff750048707a28d52d7520296c68d7ff589ca8354684bb00e0c1ac0bf"
+          },
+          "verdict": "PASS"
+        },
+        "project_id": "project-a",
+        "proposed_action": {
+          "target": "staging",
+          "type": "promote"
+        },
+        "proposed_by": "release-agent-staging",
+        "required_authority": "verifier",
+        "risk_level": "medium",
+        "scope": {
+          "project_id": "project-a",
+          "tenant_id": "tenant-a"
+        },
+        "subject": "phigraph@staging-rc7",
+        "tenant_id": "tenant-a",
+        "verification_state": "NOT_VERIFIED",
+        "version": "0.4.0"
+      },
+      "payload_hash": "1bb42114cfbfacb2ebe5ec549154d07b2e77491e147e17c2577a083893a8c96e",
+      "project_id": "project-a",
+      "record_id": "de_rc7_staging_001",
+      "tenant_id": "tenant-a"
+    },
+    {
+      "collection": "authority_decisions",
+      "payload": {
+        "approvals": [],
+        "authority_decision_id": "ad_rc7_staging_001",
+        "authority_role": "verifier",
+        "authority_subject": "human-verifier-staging",
+        "authorization_state": "AUTHORIZED",
+        "decided_at": "2026-07-29T11:59:00+00:00",
+        "envelope_id": "de_rc7_staging_001",
+        "executability_state": "NOT_EXECUTABLE",
+        "execution_state": "NOT_EXECUTED",
+        "policy_id": "PHIGRAPH_GRDI_AUTHORITY_V1",
+        "policy_version": "1.0.0",
+        "reasons": [],
+        "scope": {
+          "project_id": "project-a",
+          "tenant_id": "tenant-a"
+        },
+        "verification_state": "VERIFIED",
+        "version": "0.4.0"
+      },
+      "payload_hash": "944a0bdb7f2ebff9663b608927e3467a9f606a87f35aaa6c47468dd9e79d9c11",
+      "project_id": "project-a",
+      "record_id": "ad_rc7_staging_001",
+      "tenant_id": "tenant-a"
+    },
+    {
+      "collection": "execution_requests",
+      "payload": {
+        "action_hash": "4148ec2bb8d645df0156fa1d02ab50b73b8393a0ea193ab46bd0abb2fd544994",
+        "authority_decision_id": "ad_rc7_staging_001",
+        "created_at": "2026-07-29T12:00:00+00:00",
+        "envelope_id": "de_rc7_staging_001",
+        "expected_effects": [
+          "staging promotion recorded"
+        ],
+        "plan_id": "ep_rc7_staging_001",
+        "project_id": "project-a",
+        "requested_action": {
+          "target": "staging",
+          "type": "promote"
+        },
+        "requested_by": "grdi-rc7-staging-fixture",
+        "rollback_strategy": {
+          "target": "previous",
+          "type": "revert_release"
+        },
+        "scope": {
+          "project_id": "project-a",
+          "tenant_id": "tenant-a"
+        },
+        "tenant_id": "tenant-a",
+        "version": "0.4.0"
+      },
+      "payload_hash": "8fbef8562a877636eb5023f38fe29bb7f4e58438250d8770af60153f5c25c214",
+      "project_id": "project-a",
+      "record_id": "ep_rc7_staging_001",
+      "tenant_id": "tenant-a"
+    },
+    {
+      "collection": "gateway_decisions",
+      "payload": {
+        "authority_decision_id": "ad_rc7_staging_001",
+        "decided_at": "2026-07-29T12:00:00+00:00",
+        "eligibility": "ELIGIBLE_FOR_SHADOW",
+        "envelope_id": "de_rc7_staging_001",
+        "execution_state": "NOT_EXECUTED",
+        "gateway_decision_id": "gd_rc7_staging_001",
+        "plan_id": "ep_rc7_staging_001",
+        "policy_id": "PHIGRAPH_GRDI_SHADOW_GATEWAY_V1",
+        "policy_version": "1.0.0",
+        "reasons": [],
+        "scope": {
+          "project_id": "project-a",
+          "tenant_id": "tenant-a"
+        },
+        "simulation_state": "NOT_SIMULATED",
+        "version": "0.4.0"
+      },
+      "payload_hash": "94a66980b136386d51cccb11b52f790eedf376fedb8e744ff4db6c9edb42df88",
+      "project_id": "project-a",
+      "record_id": "gd_rc7_staging_001",
+      "tenant_id": "tenant-a"
+    },
+    {
+      "collection": "decision_envelopes",
+      "payload": {
+        "authorization_state": "NOT_AUTHORIZED",
+        "claim_ids": [],
+        "created_at": "2026-07-29T11:59:00+00:00",
+        "decision_type": "promote_release",
+        "domain": "software",
+        "envelope_id": "de_rc7_staging_002",
+        "evidence_ids": [],
+        "executability_state": "NOT_EXECUTABLE",
+        "execution_state": "NOT_EXECUTED",
+        "graph_context": {},
+        "hav_receipt": {
+          "governance": {
+            "execution_authorized": false,
+            "project_id": "project-b",
+            "tenant_id": "tenant-a"
+          },
+          "output_hash": "rc7staging0001",
+          "receipt_id": "hav_rc7_tenant-a_project-b",
+          "signature": {
+            "alg": "hmac-sha256",
+            "key_id": "core-v3-default",
+            "value": "8cdf16b5fbbb723a921cd820ba40cfb37a937753751d68f2fd324956de60d3c0"
+          },
+          "verdict": "PASS"
+        },
+        "project_id": "project-b",
+        "proposed_action": {
+          "target": "staging",
+          "type": "promote"
+        },
+        "proposed_by": "release-agent-staging",
+        "required_authority": "verifier",
+        "risk_level": "medium",
+        "scope": {
+          "project_id": "project-b",
+          "tenant_id": "tenant-a"
+        },
+        "subject": "phigraph@staging-rc7",
+        "tenant_id": "tenant-a",
+        "verification_state": "NOT_VERIFIED",
+        "version": "0.4.0"
+      },
+      "payload_hash": "a42add6d933278eae4a94916f388d31b946dd38426f8cd32e8f458a6039429db",
+      "project_id": "project-b",
+      "record_id": "de_rc7_staging_002",
+      "tenant_id": "tenant-a"
+    },
+    {
+      "collection": "authority_decisions",
+      "payload": {
+        "approvals": [],
+        "authority_decision_id": "ad_rc7_staging_002",
+        "authority_role": "verifier",
+        "authority_subject": "human-verifier-staging",
+        "authorization_state": "AUTHORIZED",
+        "decided_at": "2026-07-29T11:59:00+00:00",
+        "envelope_id": "de_rc7_staging_002",
+        "executability_state": "NOT_EXECUTABLE",
+        "execution_state": "NOT_EXECUTED",
+        "policy_id": "PHIGRAPH_GRDI_AUTHORITY_V1",
+        "policy_version": "1.0.0",
+        "reasons": [],
+        "scope": {
+          "project_id": "project-b",
+          "tenant_id": "tenant-a"
+        },
+        "verification_state": "VERIFIED",
+        "version": "0.4.0"
+      },
+      "payload_hash": "2c6204022a086312f90ca84173696bb2f2d55463a8d9b379826539fbd2f24264",
+      "project_id": "project-b",
+      "record_id": "ad_rc7_staging_002",
+      "tenant_id": "tenant-a"
+    },
+    {
+      "collection": "execution_requests",
+      "payload": {
+        "action_hash": "4148ec2bb8d645df0156fa1d02ab50b73b8393a0ea193ab46bd0abb2fd544994",
+        "authority_decision_id": "ad_rc7_staging_002",
+        "created_at": "2026-07-29T12:00:00+00:00",
+        "envelope_id": "de_rc7_staging_002",
+        "expected_effects": [
+          "staging promotion recorded"
+        ],
+        "plan_id": "ep_rc7_staging_002",
+        "project_id": "project-b",
+        "requested_action": {
+          "target": "staging",
+          "type": "promote"
+        },
+        "requested_by": "grdi-rc7-staging-fixture",
+        "rollback_strategy": {
+          "target": "previous",
+          "type": "revert_release"
+        },
+        "scope": {
+          "project_id": "project-b",
+          "tenant_id": "tenant-a"
+        },
+        "tenant_id": "tenant-a",
+        "version": "0.4.0"
+      },
+      "payload_hash": "a80fd79df486552eb94edbbb08a8fcacb816555cf97c8816ef27eaadfeca884d",
+      "project_id": "project-b",
+      "record_id": "ep_rc7_staging_002",
+      "tenant_id": "tenant-a"
+    },
+    {
+      "collection": "gateway_decisions",
+      "payload": {
+        "authority_decision_id": "ad_rc7_staging_002",
+        "decided_at": "2026-07-29T12:00:00+00:00",
+        "eligibility": "ELIGIBLE_FOR_SHADOW",
+        "envelope_id": "de_rc7_staging_002",
+        "execution_state": "NOT_EXECUTED",
+        "gateway_decision_id": "gd_rc7_staging_002",
+        "plan_id": "ep_rc7_staging_002",
+        "policy_id": "PHIGRAPH_GRDI_SHADOW_GATEWAY_V1",
+        "policy_version": "1.0.0",
+        "reasons": [],
+        "scope": {
+          "project_id": "project-b",
+          "tenant_id": "tenant-a"
+        },
+        "simulation_state": "SIMULATED",
+        "version": "0.4.0"
+      },
+      "payload_hash": "baf8e4919b3936fb5e5ae868d3e00ff4ae5a44d274e5e4f3e93b15027c48fd20",
+      "project_id": "project-b",
+      "record_id": "gd_rc7_staging_002",
+      "tenant_id": "tenant-a"
+    },
+    {
+      "collection": "shadow_execution_receipts",
+      "payload": {
+        "connector_invoked": false,
+        "executed": false,
+        "external_side_effects": false,
+        "normalized_plan": {
+          "action_hash": "4148ec2bb8d645df0156fa1d02ab50b73b8393a0ea193ab46bd0abb2fd544994",
+          "authority_decision_id": "ad_rc7_staging_002",
+          "connector_invoked": false,
+          "envelope_id": "de_rc7_staging_002",
+          "executed": false,
+          "execution_state": "NOT_EXECUTED",
+          "expected_effects": [
+            "staging promotion recorded"
+          ],
+          "external_side_effects": false,
+          "gateway_eligibility": "ELIGIBLE_FOR_SHADOW",
+          "plan_id": "ep_rc7_staging_002",
+          "policy_id": "PHIGRAPH_GRDI_SHADOW_GATEWAY_V1",
+          "policy_version": "1.0.0",
+          "project_id": "project-b",
+          "requested_action": {
+            "target": "staging",
+            "type": "promote"
+          },
+          "rollback_strategy": {
+            "target": "previous",
+            "type": "revert_release"
+          },
+          "signature": {
+            "alg": "hmac-sha256",
+            "key_id": "core-v3-default",
+            "value": "1d6888a5103a22fbf291aea33269e513dc49cb24d7d298b51754ea4d54b1963a"
+          },
+          "simulation_state": "SIMULATED",
+          "tenant_id": "tenant-a"
+        },
+        "plan_id": "ep_rc7_staging_002",
+        "receipt_id": "sr_rc7_staging_002",
+        "scope": {
+          "project_id": "project-b",
+          "tenant_id": "tenant-a"
+        },
+        "simulated_at": "2026-07-29T12:01:00+00:00",
+        "version": "0.4.0"
+      },
+      "payload_hash": "e14ff389445ac5e11382a15acd3a14884df1a0889031c320bea37c4fc73d5924",
+      "project_id": "project-b",
+      "record_id": "sr_rc7_staging_002",
+      "tenant_id": "tenant-a"
+    },
+    {
+      "collection": "decision_envelopes",
+      "payload": {
+        "authorization_state": "NOT_AUTHORIZED",
+        "claim_ids": [],
+        "created_at": "2026-07-29T11:59:00+00:00",
+        "decision_type": "promote_release",
+        "domain": "software",
+        "envelope_id": "de_rc7_staging_003",
+        "evidence_ids": [],
+        "executability_state": "NOT_EXECUTABLE",
+        "execution_state": "NOT_EXECUTED",
+        "graph_context": {},
+        "hav_receipt": {
+          "governance": {
+            "execution_authorized": false,
+            "project_id": "project-a",
+            "tenant_id": "tenant-b"
+          },
+          "output_hash": "rc7staging0001",
+          "receipt_id": "hav_rc7_tenant-b_project-a",
+          "signature": {
+            "alg": "hmac-sha256",
+            "key_id": "core-v3-default",
+            "value": "a639c56a4bd4b35053ead7fe4d85da346a5c3ebb1bc4effa3a228154b7f78641"
+          },
+          "verdict": "PASS"
+        },
+        "project_id": "project-a",
+        "proposed_action": {
+          "target": "staging",
+          "type": "promote"
+        },
+        "proposed_by": "release-agent-staging",
+        "required_authority": "verifier",
+        "risk_level": "medium",
+        "scope": {
+          "project_id": "project-a",
+          "tenant_id": "tenant-b"
+        },
+        "subject": "phigraph@staging-rc7",
+        "tenant_id": "tenant-b",
+        "verification_state": "NOT_VERIFIED",
+        "version": "0.4.0"
+      },
+      "payload_hash": "329f48f65f2cbd96285ab8107c025d670a8de0f1b59059ec56d2004c432a0364",
+      "project_id": "project-a",
+      "record_id": "de_rc7_staging_003",
+      "tenant_id": "tenant-b"
+    },
+    {
+      "collection": "authority_decisions",
+      "payload": {
+        "approvals": [],
+        "authority_decision_id": "ad_rc7_staging_003",
+        "authority_role": "verifier",
+        "authority_subject": "human-verifier-staging",
+        "authorization_state": "AUTHORIZED",
+        "decided_at": "2026-07-29T11:59:00+00:00",
+        "envelope_id": "de_rc7_staging_003",
+        "executability_state": "NOT_EXECUTABLE",
+        "execution_state": "NOT_EXECUTED",
+        "policy_id": "PHIGRAPH_GRDI_AUTHORITY_V1",
+        "policy_version": "1.0.0",
+        "reasons": [],
+        "scope": {
+          "project_id": "project-a",
+          "tenant_id": "tenant-b"
+        },
+        "verification_state": "VERIFIED",
+        "version": "0.4.0"
+      },
+      "payload_hash": "4c93ee6c81572f1275d57aaeeb9da96a2fb320f7613a7145a640b74ace8371d3",
+      "project_id": "project-a",
+      "record_id": "ad_rc7_staging_003",
+      "tenant_id": "tenant-b"
+    },
+    {
+      "collection": "execution_requests",
+      "payload": {
+        "action_hash": "4148ec2bb8d645df0156fa1d02ab50b73b8393a0ea193ab46bd0abb2fd544994",
+        "authority_decision_id": "ad_rc7_staging_003",
+        "created_at": "2026-07-29T12:00:00+00:00",
+        "envelope_id": "de_rc7_staging_003",
+        "expected_effects": [
+          "staging promotion recorded"
+        ],
+        "plan_id": "ep_rc7_staging_003",
+        "project_id": "project-a",
+        "requested_action": {
+          "target": "staging",
+          "type": "promote"
+        },
+        "requested_by": "grdi-rc7-staging-fixture",
+        "rollback_strategy": {
+          "target": "previous",
+          "type": "revert_release"
+        },
+        "scope": {
+          "project_id": "project-a",
+          "tenant_id": "tenant-b"
+        },
+        "tenant_id": "tenant-b",
+        "version": "0.4.0"
+      },
+      "payload_hash": "e314d247fdf1d9860813abdcd0e533b003134916e5f91d650573230db0d091ee",
+      "project_id": "project-a",
+      "record_id": "ep_rc7_staging_003",
+      "tenant_id": "tenant-b"
+    },
+    {
+      "collection": "gateway_decisions",
+      "payload": {
+        "authority_decision_id": "ad_rc7_staging_003",
+        "decided_at": "2026-07-29T12:00:00+00:00",
+        "eligibility": "ELIGIBLE_FOR_SHADOW",
+        "envelope_id": "de_rc7_staging_003",
+        "execution_state": "NOT_EXECUTED",
+        "gateway_decision_id": "gd_rc7_staging_003",
+        "plan_id": "ep_rc7_staging_003",
+        "policy_id": "PHIGRAPH_GRDI_SHADOW_GATEWAY_V1",
+        "policy_version": "1.0.0",
+        "reasons": [],
+        "scope": {
+          "project_id": "project-a",
+          "tenant_id": "tenant-b"
+        },
+        "simulation_state": "SIMULATED",
+        "version": "0.4.0"
+      },
+      "payload_hash": "f6177ffc91da290416f8070315f46b7e51ca23f4c48561c441650ec0f70c42eb",
+      "project_id": "project-a",
+      "record_id": "gd_rc7_staging_003",
+      "tenant_id": "tenant-b"
+    },
+    {
+      "collection": "decision_envelopes",
+      "payload": {
+        "authorization_state": "NOT_AUTHORIZED",
+        "claim_ids": [],
+        "created_at": "2026-07-29T11:59:00+00:00",
+        "decision_type": "promote_release",
+        "domain": "software",
+        "envelope_id": "de_rc7_staging_004",
+        "evidence_ids": [],
+        "executability_state": "NOT_EXECUTABLE",
+        "execution_state": "NOT_EXECUTED",
+        "graph_context": {},
+        "hav_receipt": {
+          "governance": {
+            "execution_authorized": false,
+            "project_id": "project-b",
+            "tenant_id": "tenant-b"
+          },
+          "output_hash": "rc7staging0001",
+          "receipt_id": "hav_rc7_tenant-b_project-b",
+          "signature": {
+            "alg": "hmac-sha256",
+            "key_id": "core-v3-default",
+            "value": "1f23a5077d6bb843fa9fa1233b22cdecd0e412203bcc261388a653892c1ae501"
+          },
+          "verdict": "PASS"
+        },
+        "project_id": "project-b",
+        "proposed_action": {
+          "target": "staging",
+          "type": "promote"
+        },
+        "proposed_by": "release-agent-staging",
+        "required_authority": "verifier",
+        "risk_level": "medium",
+        "scope": {
+          "project_id": "project-b",
+          "tenant_id": "tenant-b"
+        },
+        "subject": "phigraph@staging-rc7",
+        "tenant_id": "tenant-b",
+        "verification_state": "NOT_VERIFIED",
+        "version": "0.4.0"
+      },
+      "payload_hash": "3373be7217d74cd54095034f40f2aa1cb6f721da16ae00d32951212dd25870e1",
+      "project_id": "project-b",
+      "record_id": "de_rc7_staging_004",
+      "tenant_id": "tenant-b"
+    },
+    {
+      "collection": "authority_decisions",
+      "payload": {
+        "approvals": [],
+        "authority_decision_id": "ad_rc7_staging_004",
+        "authority_role": "verifier",
+        "authority_subject": "human-verifier-staging",
+        "authorization_state": "AUTHORIZED",
+        "decided_at": "2026-07-29T11:59:00+00:00",
+        "envelope_id": "de_rc7_staging_004",
+        "executability_state": "NOT_EXECUTABLE",
+        "execution_state": "NOT_EXECUTED",
+        "policy_id": "PHIGRAPH_GRDI_AUTHORITY_V1",
+        "policy_version": "1.0.0",
+        "reasons": [],
+        "scope": {
+          "project_id": "project-b",
+          "tenant_id": "tenant-b"
+        },
+        "verification_state": "VERIFIED",
+        "version": "0.4.0"
+      },
+      "payload_hash": "e847dfd70f709fcfe87c92a0fbb216a5ed0ffaf087887534a471ac208918169d",
+      "project_id": "project-b",
+      "record_id": "ad_rc7_staging_004",
+      "tenant_id": "tenant-b"
+    },
+    {
+      "collection": "execution_requests",
+      "payload": {
+        "action_hash": "4148ec2bb8d645df0156fa1d02ab50b73b8393a0ea193ab46bd0abb2fd544994",
+        "authority_decision_id": "ad_rc7_staging_004",
+        "created_at": "2026-07-29T12:00:00+00:00",
+        "envelope_id": "de_rc7_staging_004",
+        "expected_effects": [
+          "staging promotion recorded"
+        ],
+        "plan_id": "ep_rc7_staging_004",
+        "project_id": "project-b",
+        "requested_action": {
+          "target": "staging",
+          "type": "promote"
+        },
+        "requested_by": "grdi-rc7-staging-fixture",
+        "rollback_strategy": {
+          "target": "previous",
+          "type": "revert_release"
+        },
+        "scope": {
+          "project_id": "project-b",
+          "tenant_id": "tenant-b"
+        },
+        "tenant_id": "tenant-b",
+        "version": "0.4.0"
+      },
+      "payload_hash": "d02276c3e115e5adf2a5554ceaf59203388f686eb4a51e6501a3c3f06c9a8a4d",
+      "project_id": "project-b",
+      "record_id": "ep_rc7_staging_004",
+      "tenant_id": "tenant-b"
+    },
+    {
+      "collection": "gateway_decisions",
+      "payload": {
+        "authority_decision_id": "ad_rc7_staging_004",
+        "decided_at": "2026-07-29T12:00:00+00:00",
+        "eligibility": "ELIGIBLE_FOR_SHADOW",
+        "envelope_id": "de_rc7_staging_004",
+        "execution_state": "NOT_EXECUTED",
+        "gateway_decision_id": "gd_rc7_staging_004",
+        "plan_id": "ep_rc7_staging_004",
+        "policy_id": "PHIGRAPH_GRDI_SHADOW_GATEWAY_V1",
+        "policy_version": "1.0.0",
+        "reasons": [],
+        "scope": {
+          "project_id": "project-b",
+          "tenant_id": "tenant-b"
+        },
+        "simulation_state": "SIMULATED",
+        "version": "0.4.0"
+      },
+      "payload_hash": "8a4b67aba2799aa1bd1e35183b8c55ccb316a5c31553f6445409678dd6fb7ce9",
+      "project_id": "project-b",
+      "record_id": "gd_rc7_staging_004",
+      "tenant_id": "tenant-b"
+    },
+    {
+      "collection": "shadow_execution_receipts",
+      "payload": {
+        "connector_invoked": false,
+        "executed": false,
+        "external_side_effects": false,
+        "normalized_plan": {
+          "action_hash": "4148ec2bb8d645df0156fa1d02ab50b73b8393a0ea193ab46bd0abb2fd544994",
+          "authority_decision_id": "ad_rc7_staging_004",
+          "connector_invoked": false,
+          "envelope_id": "de_rc7_staging_004",
+          "executed": false,
+          "execution_state": "NOT_EXECUTED",
+          "expected_effects": [
+            "staging promotion recorded"
+          ],
+          "external_side_effects": false,
+          "gateway_eligibility": "ELIGIBLE_FOR_SHADOW",
+          "plan_id": "ep_rc7_staging_004",
+          "policy_id": "PHIGRAPH_GRDI_SHADOW_GATEWAY_V1",
+          "policy_version": "1.0.0",
+          "project_id": "project-b",
+          "requested_action": {
+            "target": "staging",
+            "type": "promote"
+          },
+          "rollback_strategy": {
+            "target": "previous",
+            "type": "revert_release"
+          },
+          "signature": {
+            "alg": "hmac-sha256",
+            "key_id": "core-v3-default",
+            "value": "a6b9f0500ea483ba66bfb15dd061e91d27795888f66b9d312e945a5a1654a9ce"
+          },
+          "simulation_state": "SIMULATED",
+          "tenant_id": "tenant-b"
+        },
+        "plan_id": "ep_rc7_staging_004",
+        "receipt_id": "sr_rc7_staging_004",
+        "scope": {
+          "project_id": "project-b",
+          "tenant_id": "tenant-b"
+        },
+        "simulated_at": "2026-07-29T12:01:00+00:00",
+        "version": "0.4.0"
+      },
+      "payload_hash": "c9e77d9391ed5968f859065e6126552ba9052beed389d587ba42207d79b9f019",
+      "project_id": "project-b",
+      "record_id": "sr_rc7_staging_004",
+      "tenant_id": "tenant-b"
+    }
+  ],
+  "fixture_signing_key_fingerprint": "1478acddace9283dac642925b9e657adf6ccddad2f2fe128b61a161e407ab5c2",
+  "fixture_signing_key_label": "rc7-staging-fixture-v1"
+}
