@@ -33,6 +33,11 @@ ENVIRONMENT_METADATA_TABLE = "phigraph_environment_metadata"
 REPO_ROOT = Path(__file__).resolve().parents[1]
 FROZEN_PAYLOADS_PATH = REPO_ROOT / "scripts" / "data" / "grdi_rc7_staging_fixture_rows.json"
 
+TENANT_A = "tenant-a"
+TENANT_B = "tenant-b"
+PROJECT_A = "project-a"
+PROJECT_B = "project-b"
+
 FIXTURE_SIGNING_KEY = "grdi-rc7-staging-fixture-key-v1"  # nosec B105 — synthetic staging-only fixture key
 FIXTURE_SIGNING_KEY_LABEL = "rc7-staging-fixture-v1"
 FIXTURE_SIGNING_KEY_FINGERPRINT = (
