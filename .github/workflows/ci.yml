@@ -180,7 +180,7 @@ jobs:
           test -n "$WHEEL_PATH"
           /tmp/phigraph-wheel-test/bin/pip install "${WHEEL_PATH}[api,benchmark,auth,app]"
           /tmp/phigraph-wheel-test/bin/python -c "from importlib.metadata import version; from packaging.version import Version; import phigraph; from phigraph.version import CORE_VERSION; assert Version(CORE_VERSION) == Version(version('phigraph-causal'))"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: phigraph-distributions
           path: dist/*
