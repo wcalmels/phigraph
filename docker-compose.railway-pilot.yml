@@ -1,0 +1,38 @@
+services:
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: phigraph
+      POSTGRES_PASSWORD: phigraph
+      POSTGRES_DB: phigraph_pilot
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U phigraph -d phigraph_pilot"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  phigraph-api:
+    build: .
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      PHIGRAPH_ENV: staging
+      PHIGRAPH_PORT: 8000
+      PHIGRAPH_BACKEND: postgresql
+      PHIGRAPH_POSTGRES_DSN: postgresql://phigraph:phigraph@postgres:5432/phigraph_pilot
+      PHIGRAPH_SHADOW_ONLY: "true"
+      PHIGRAPH_REAL_CONNECTORS_ENABLED: "false"
+      PHIGRAPH_DATA_DIR: /app/data
+      PHIGRAPH_API_KEY: local-pilot-api-key
+      PHIGRAPH_RECEIPT_SIGNING_KEY: local-pilot-receipt-key
+    ports:
+      - "8000:8000"
+    volumes:
+      - phigraph-pilot-data:/app/data
+    restart: unless-stopped
+
+volumes:
+  phigraph-pilot-data:

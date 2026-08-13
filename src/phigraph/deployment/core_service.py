@@ -21,5 +21,7 @@ def build_core_service(settings: DeploymentSettings) -> CoreV3Service:
     receipt_signing_key = require_receipt_signing_key(settings)
     return CoreV3Service(
         data_dir=settings.data_dir,
+        backend=settings.core_backend,
+        postgres_dsn=settings.postgres_dsn,
         receipt_signing_key=receipt_signing_key,
     )

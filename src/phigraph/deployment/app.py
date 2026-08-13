@@ -21,6 +21,7 @@ from .config import DeploymentSettings, load_settings
 from .core_service import build_core_service, require_receipt_signing_key
 from .general_platform_app import create_general_platform_router
 from .platform_app import create_platform_router
+from .postgres_health import check_postgres_connectivity
 from .schemas import HealthResponse, ShadowRequest, ShadowResponse
 from .security import verify_api_key
 
@@ -51,6 +52,14 @@ def create_app(
         ),
     )
 
+    @app.get("/health/live")
+    def health_live() -> dict[str, str]:
+        return {
+            "status": "alive",
+            "version": _package_version(),
+            "environment": settings.environment,
+        }
+
     @app.get("/health", response_model=HealthResponse)
     def health() -> HealthResponse:
         check = run_health_checks(data_path=settings.data_dir)
@@ -62,17 +71,36 @@ def create_app(
             checks=check.to_dict(),
         )
 
+    def _readiness_checks() -> dict[str, object]:
+        checks: dict[str, object] = run_health_checks(data_path=settings.data_dir).to_dict()
+        if settings.core_backend in {"postgres", "postgresql"}:
+            if not settings.postgres_dsn:
+                checks["postgres"] = {"status": "error", "reason": "dsn_not_configured"}
+            else:
+                checks["postgres"] = check_postgres_connectivity(settings.postgres_dsn)
+        return checks
+
     @app.get("/ready", response_model=HealthResponse)
     def ready() -> HealthResponse:
-        check = run_health_checks(data_path=settings.data_dir)
-        status = "ready" if check.healthy else "not_ready"
-        code = 200 if check.healthy else 503
+        checks = _readiness_checks()
+        disk_ok = bool(checks.get("data_path_writable")) and bool(checks.get("free_disk_ok"))
+        postgres_check = checks.get("postgres")
+        postgres_ok = (
+            postgres_check is None
+            or (
+                isinstance(postgres_check, dict)
+                and postgres_check.get("status") == "ok"
+            )
+        )
+        healthy = disk_ok and postgres_ok
+        status = "ready" if healthy else "not_ready"
+        code = 200 if healthy else 503
         response = HealthResponse(
             status=status,
             version=_package_version(),
             environment=settings.environment,
             shadow_only=settings.shadow_only,
-            checks=check.to_dict(),
+            checks=checks,
         )
         if code != 200:
             return JSONResponse(
@@ -163,6 +191,8 @@ def create_app(
     app.include_router(
         create_core_v3_router(
             service=core_service,
+            backend=settings.core_backend,
+            postgres_dsn=settings.postgres_dsn,
             api_key=settings.api_key,
             receipt_signing_key=receipt_signing_key,
             allow_unauthenticated_dev=allow_unauthenticated_hav_dev,
