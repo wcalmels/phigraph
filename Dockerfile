@@ -12,7 +12,7 @@ WORKDIR /app
 COPY pyproject.toml README.md LICENSE ./
 COPY src ./src
 
-RUN pip install --no-cache-dir ".[api,postgres]"
+RUN pip install --no-cache-dir ".[api,postgres,benchmark]"
 
 RUN useradd --create-home --uid 10001 phigraph \
     && mkdir -p /app/data \
