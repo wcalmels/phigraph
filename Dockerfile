@@ -12,6 +12,8 @@ WORKDIR /app
 COPY pyproject.toml README.md LICENSE ./
 COPY src ./src
 
+# CACHE_BUST: bump when forcing Railway to rebuild pip layer (sklearn / __init__ fixes).
+ARG CACHE_BUST=20260729-sklearn
 RUN pip install --no-cache-dir ".[api,postgres,benchmark]"
 
 RUN useradd --create-home --uid 10001 phigraph \

@@ -89,7 +89,7 @@ try:
         make_synthetic_fraud,
         run_benchmark,
     )
-except ModuleNotFoundError:  # optional extra; API/pilot images may omit scikit-learn
+except (ModuleNotFoundError, ImportError):  # optional extra; pilot may omit scikit-learn
     BenchmarkConfig = BenchmarkResult = None
     make_synthetic_fleet = make_synthetic_fraud = run_benchmark = None
 
