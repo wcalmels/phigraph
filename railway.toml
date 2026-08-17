@@ -3,10 +3,9 @@ builder = "DOCKERFILE"
 dockerfilePath = "Dockerfile"
 
 [deploy]
+# Overrides UI pre-deploy (e.g. stuck "npm run migrate" on duplicated services).
+preDeployCommand = ["python", "scripts/deploy/bootstrap_postgres_migrations.py"]
 healthcheckPath = "/health/live"
 healthcheckTimeout = 30
 restartPolicyType = "ON_FAILURE"
 restartPolicyMaxRetries = 5
-
-# Release command (recommended before first traffic):
-# python scripts/deploy/bootstrap_postgres_migrations.py
