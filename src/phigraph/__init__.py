@@ -81,13 +81,17 @@ from .meta_workflow import MetaOperationalConfig, run_meta_operational_workflow
 
 from .advanced_meta_workflow import AdvancedMetaConfig, run_advanced_meta_workflow
 
-from .benchmark import (
-    BenchmarkConfig,
-    BenchmarkResult,
-    make_synthetic_fleet,
-    make_synthetic_fraud,
-    run_benchmark,
-)
+try:
+    from .benchmark import (
+        BenchmarkConfig,
+        BenchmarkResult,
+        make_synthetic_fleet,
+        make_synthetic_fraud,
+        run_benchmark,
+    )
+except ModuleNotFoundError:  # optional extra; API/pilot images may omit scikit-learn
+    BenchmarkConfig = BenchmarkResult = None
+    make_synthetic_fleet = make_synthetic_fraud = run_benchmark = None
 
 from .kernel_workflow import AdaptiveKernelConfig, run_adaptive_kernel_workflow
 
