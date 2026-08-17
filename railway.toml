@@ -3,8 +3,8 @@ builder = "DOCKERFILE"
 dockerfilePath = "Dockerfile"
 
 [deploy]
-# Overrides UI pre-deploy (e.g. stuck "npm run migrate" on duplicated services).
-preDeployCommand = ["python", "scripts/deploy/bootstrap_postgres_migrations.py"]
+# Pre-deploy must use the installed package (scripts/ is not copied into the image).
+preDeployCommand = ["python", "-c", "import os; from phigraph.core_v3.postgres_migrations import bootstrap_postgres_scoped_schema; dsn=os.getenv('PHIGRAPH_POSTGRES_DSN','').strip(); assert dsn, 'PHIGRAPH_POSTGRES_DSN required'; applied=bootstrap_postgres_scoped_schema(dsn); print('applied migrations:', applied or 'none')"]
 healthcheckPath = "/health/live"
 healthcheckTimeout = 30
 restartPolicyType = "ON_FAILURE"
