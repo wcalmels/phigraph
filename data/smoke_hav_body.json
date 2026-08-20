@@ -1,0 +1,7 @@
+{
+  "candidate_output": "CodeQL status: passed",
+  "source_system": "github-actions",
+  "state_available": true,
+  "evidence": [],
+  "agent_id": "release-agent"
+}
