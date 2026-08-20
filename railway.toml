@@ -3,8 +3,8 @@ builder = "DOCKERFILE"
 dockerfilePath = "Dockerfile"
 
 [deploy]
-# No-op overrides stuck UI pre-deploy (npm migrate). Migrations run on API startup.
-preDeployCommand = ["python", "-c", "print('pre-deploy ok')"]
+# Railway allows at most one preDeployCommand entry (shell string, not argv list).
+preDeployCommand = ["python -c \"print('pre-deploy ok')\""]
 healthcheckPath = "/health/live"
 healthcheckTimeout = 30
 restartPolicyType = "ON_FAILURE"
