@@ -7,6 +7,7 @@ from fastapi import FastAPI, Header, HTTPException
 from fastapi.responses import JSONResponse
 
 from phigraph.core_v3.api import create_core_v3_router
+from phigraph.core_v3.api_key_registry import validate_api_key_registry
 from phigraph.cyber_mvp.api import create_cyber_mvp_router
 from phigraph.grdi.api import create_grdi_router
 from phigraph.hav.api import create_hav_router
@@ -183,6 +184,13 @@ def create_app(
     app.include_router(create_cyber_mvp_router())
     core_service = build_core_service(settings)
     receipt_signing_key = require_receipt_signing_key(settings)
+    try:
+        api_key_registry = validate_api_key_registry()
+    except ValueError as exc:
+        raise ValueError(f"api_key_registry_invalid: {exc}") from exc
+    jwt_secret = os.getenv("PHIGRAPH_JWT_SECRET")
+    jwt_issuer = os.getenv("PHIGRAPH_JWT_ISSUER")
+    jwt_audience = os.getenv("PHIGRAPH_JWT_AUDIENCE")
     allow_unauthenticated_hav_dev = (
         settings.environment in {"development", "test"}
         and os.getenv("PHIGRAPH_HAV_ALLOW_UNAUTHENTICATED_DEV", "").strip().lower()
@@ -195,6 +203,10 @@ def create_app(
             postgres_dsn=settings.postgres_dsn,
             api_key=settings.api_key,
             receipt_signing_key=receipt_signing_key,
+            jwt_secret=jwt_secret,
+            jwt_issuer=jwt_issuer,
+            jwt_audience=jwt_audience,
+            api_key_registry=api_key_registry,
             allow_unauthenticated_dev=allow_unauthenticated_hav_dev,
         )
     )
@@ -206,6 +218,10 @@ def create_app(
             allow_unauthenticated_dev=allow_unauthenticated_hav_dev,
             receipt_signing_key=receipt_signing_key,
             require_receipt_signing_key=settings.environment in {"staging", "production"},
+            jwt_secret=jwt_secret,
+            jwt_issuer=jwt_issuer,
+            jwt_audience=jwt_audience,
+            api_key_registry=api_key_registry,
         )
     )
     app.include_router(
@@ -214,6 +230,7 @@ def create_app(
             api_key=settings.api_key,
             environment=settings.environment,
             allow_unauthenticated_dev=allow_unauthenticated_hav_dev,
+            api_key_registry=api_key_registry,
         )
     )
 

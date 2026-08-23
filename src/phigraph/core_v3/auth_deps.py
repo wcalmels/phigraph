@@ -6,6 +6,7 @@ from typing import Any, Callable
 from fastapi import Depends, Header, HTTPException
 
 from .api_key_identity import ApiKeyIdentity, DevIdentity
+from .api_key_registry import ApiKeyRegistry
 from .auth import JWKSCache, JWTValidator, OIDCValidator
 from .idempotency import IdempotencyStore
 from .metrics import CoreMetrics
@@ -41,6 +42,7 @@ def build_core_auth_dependencies(
     environment: str = "development",
     allow_unauthenticated_dev: bool = False,
     api_key_identity: ApiKeyIdentity | None = None,
+    api_key_registry: ApiKeyRegistry | None = None,
     dev_identity: DevIdentity | None = None,
 ) -> CoreAuthDependencies:
     metrics = CoreMetrics()
@@ -59,7 +61,7 @@ def build_core_auth_dependencies(
     bearer_auth_configured = jwt_validator is not None or oidc_validator is not None
     api_key_identity = api_key_identity or ApiKeyIdentity()
     dev_identity = dev_identity or DevIdentity()
-    core_auth_configured = bearer_auth_configured or api_key is not None
+    core_auth_configured = bearer_auth_configured or api_key is not None or api_key_registry is not None
 
     def principal(
         x_tenant_id: str = Header(default="default"),
@@ -92,6 +94,13 @@ def build_core_auth_dependencies(
             except ValueError as exc:
                 metrics.inc("auth.denied")
                 raise HTTPException(status_code=401, detail=str(exc)) from exc
+
+        if api_key_registry is not None:
+            registered = api_key_registry.resolve(x_api_key)
+            if registered is not None:
+                return registered.to_principal()
+            metrics.inc("auth.denied")
+            raise HTTPException(status_code=401, detail="invalid_api_key")
 
         if api_key is not None:
             if x_api_key != api_key:

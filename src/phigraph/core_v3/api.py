@@ -9,6 +9,7 @@ from pydantic import BaseModel, Field
 
 from .adapters import AgentProposal, StaticAgentAdapter
 from .api_key_identity import ApiKeyIdentity
+from .api_key_registry import ApiKeyRegistry
 from .auth_deps import build_core_auth_dependencies
 from .models import ActionProposal, Claim, ClaimStatus, Evidence, EvidenceStatus, RuntimeMode, Verification
 from .security import Principal
@@ -155,6 +156,7 @@ def create_core_v3_router(
     rate_window_seconds: int = 60,
     allow_unauthenticated_dev: bool = False,
     api_key_identity: ApiKeyIdentity | None = None,
+    api_key_registry: ApiKeyRegistry | None = None,
 ) -> APIRouter:
     if service is None:
         if data_dir is None:
@@ -183,6 +185,7 @@ def create_core_v3_router(
         rate_window_seconds=rate_window_seconds,
         allow_unauthenticated_dev=allow_unauthenticated_dev,
         api_key_identity=api_key_identity,
+        api_key_registry=api_key_registry,
     )
     metrics = auth.metrics
     require = auth.require

@@ -6,6 +6,7 @@ from fastapi import APIRouter, Depends, Header, HTTPException
 from pydantic import BaseModel, Field
 
 from phigraph.core_v3.api_key_identity import ApiKeyIdentity
+from phigraph.core_v3.api_key_registry import ApiKeyRegistry
 from phigraph.core_v3.auth_deps import build_core_auth_dependencies
 from phigraph.core_v3.security import Role
 from phigraph.core_v3.service import CoreV3Service
@@ -73,6 +74,7 @@ def create_grdi_router(
     environment: str = "development",
     allow_unauthenticated_dev: bool = False,
     api_key_identity: ApiKeyIdentity | None = None,
+    api_key_registry: ApiKeyRegistry | None = None,
 ) -> APIRouter:
     auth = build_core_auth_dependencies(
         service,
@@ -81,6 +83,7 @@ def create_grdi_router(
         environment=environment,
         allow_unauthenticated_dev=allow_unauthenticated_dev,
         api_key_identity=api_key_identity or ApiKeyIdentity(role=Role.VERIFIER),
+        api_key_registry=api_key_registry,
     )
     grdi = GRDIService(service)
     router = APIRouter(prefix="/v4/grdi", tags=["grdi-foundation"])

@@ -8,6 +8,7 @@ from fastapi import APIRouter, Depends, Header, HTTPException
 from pydantic import BaseModel, Field
 
 from phigraph.core_v3.api_key_identity import ApiKeyIdentity
+from phigraph.core_v3.api_key_registry import ApiKeyRegistry
 from phigraph.core_v3.auth_deps import build_core_auth_dependencies
 from phigraph.core_v3.security import Role
 from phigraph.core_v3.service import CoreV3Service
@@ -101,6 +102,7 @@ def create_hav_router(
     environment: str = "development",
     allow_unauthenticated_dev: bool = False,
     api_key_identity: ApiKeyIdentity | None = None,
+    api_key_registry: ApiKeyRegistry | None = None,
     require_receipt_signing_key: bool = False,
 ) -> APIRouter:
     if require_receipt_signing_key and not receipt_signing_key:
@@ -136,6 +138,7 @@ def create_hav_router(
         environment=environment,
         allow_unauthenticated_dev=allow_unauthenticated_dev,
         api_key_identity=hav_api_identity,
+        api_key_registry=api_key_registry,
     )
     hav_service = PhiGraphHAVService(core)
     router = APIRouter(prefix="/v3/hav", tags=["phigraph-hav"])
