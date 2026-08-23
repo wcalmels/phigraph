@@ -3,8 +3,9 @@
 .SYNOPSIS
   Configure phigraph-api registry variables on the existing phigraph-private-pilot project.
 
-  By default, keeps the running service and only sets variables (--skip-deploys).
-  Service deletion/recreation requires -ConfirmServiceRecreation (destructive factory reset).
+  By default, keeps the running service and only sets registry keys (_PROPOSER, _VERIFIER,
+  _TENANT_B) without rotating PHIGRAPH_API_KEY or PHIGRAPH_RECEIPT_SIGNING_KEY.
+  Service deletion/recreation and legacy secret rotation require -ConfirmServiceRecreation.
 
 .PREREQUISITE
   railway login
@@ -96,16 +97,20 @@ if ($ConfirmServiceRecreation) {
     $stepPrefix = '[3/4]'
     $finalStep = '[4/4]'
 } else {
-    Write-Host "Configuring variables on existing '$ServiceName' (service is NOT deleted)." -ForegroundColor Green
+    Write-Host "Configuring registry variables on existing '$ServiceName' (service and legacy secrets preserved)." -ForegroundColor Green
     $stepPrefix = '[1/2]'
     $finalStep = '[2/2]'
 }
 
-$apiKey = New-RandomSecret
 $proposerKey = New-RandomSecret
 $verifierKey = New-RandomSecret
 $tenantBKey = New-RandomSecret
-$receiptKey = New-RandomSecret
+$apiKey = $null
+$receiptKey = $null
+if ($ConfirmServiceRecreation) {
+    $apiKey = New-RandomSecret
+    $receiptKey = New-RandomSecret
+}
 
 Write-Host "$stepPrefix Setting variables..." -ForegroundColor Yellow
 $vars = @(
@@ -122,34 +127,41 @@ foreach ($pair in $vars) {
 }
 $prev = $ErrorActionPreference
 $ErrorActionPreference = 'Continue'
-$apiKey | railway variable set PHIGRAPH_API_KEY --stdin --service $ServiceName --skip-deploys
-if ($LASTEXITCODE -ne 0) { throw 'PHIGRAPH_API_KEY set failed' }
 $proposerKey | railway variable set PHIGRAPH_API_KEY_PROPOSER --stdin --service $ServiceName --skip-deploys
 if ($LASTEXITCODE -ne 0) { throw 'PHIGRAPH_API_KEY_PROPOSER set failed' }
 $verifierKey | railway variable set PHIGRAPH_API_KEY_VERIFIER --stdin --service $ServiceName --skip-deploys
 if ($LASTEXITCODE -ne 0) { throw 'PHIGRAPH_API_KEY_VERIFIER set failed' }
 $tenantBKey | railway variable set PHIGRAPH_API_KEY_TENANT_B --stdin --service $ServiceName --skip-deploys
 if ($LASTEXITCODE -ne 0) { throw 'PHIGRAPH_API_KEY_TENANT_B set failed' }
-$receiptKey | railway variable set PHIGRAPH_RECEIPT_SIGNING_KEY --stdin --service $ServiceName --skip-deploys
-if ($LASTEXITCODE -ne 0) { throw 'PHIGRAPH_RECEIPT_SIGNING_KEY set failed' }
+if ($ConfirmServiceRecreation) {
+    $apiKey | railway variable set PHIGRAPH_API_KEY --stdin --service $ServiceName --skip-deploys
+    if ($LASTEXITCODE -ne 0) { throw 'PHIGRAPH_API_KEY set failed' }
+    $receiptKey | railway variable set PHIGRAPH_RECEIPT_SIGNING_KEY --stdin --service $ServiceName --skip-deploys
+    if ($LASTEXITCODE -ne 0) { throw 'PHIGRAPH_RECEIPT_SIGNING_KEY set failed' }
+}
 $ErrorActionPreference = $prev
 
 if ($ConfirmServiceRecreation) {
     Write-Host "$finalStep Deploying from latest commit..." -ForegroundColor Yellow
     Invoke-Railway -CommandArgs @('redeploy', '--service', $ServiceName, '--from-source', '--yes')
 } else {
-    Write-Host "$finalStep Variables set with --skip-deploys. Redeploy manually when ready." -ForegroundColor Yellow
+    Write-Host "$finalStep Registry variables set with --skip-deploys. PHIGRAPH_API_KEY and PHIGRAPH_RECEIPT_SIGNING_KEY were not rotated." -ForegroundColor Yellow
 }
 
 Write-Host "`n== DONE. Secrets were sent to Railway only (not printed). ==" -ForegroundColor Green
-Write-Host 'PHIGRAPH_API_KEY configured'
 Write-Host 'PHIGRAPH_API_KEY_PROPOSER configured'
 Write-Host 'PHIGRAPH_API_KEY_VERIFIER configured'
 Write-Host 'PHIGRAPH_API_KEY_TENANT_B configured'
-Write-Host 'PHIGRAPH_RECEIPT_SIGNING_KEY configured'
+if ($ConfirmServiceRecreation) {
+    Write-Host 'PHIGRAPH_API_KEY configured'
+    Write-Host 'PHIGRAPH_RECEIPT_SIGNING_KEY configured'
+} else {
+    Write-Host 'PHIGRAPH_API_KEY unchanged'
+    Write-Host 'PHIGRAPH_RECEIPT_SIGNING_KEY unchanged'
+}
 Write-Host 'Retrieve values from Railway Variables UI. Never paste secrets in chat, logs, or transcripts.' -ForegroundColor Yellow
 if (-not $ConfirmServiceRecreation) {
-    Write-Host 'Service was not deleted. Use -ConfirmServiceRecreation only for destructive factory reset.' -ForegroundColor DarkYellow
+    Write-Host 'Service was not deleted. Use -ConfirmServiceRecreation only for destructive factory reset and legacy secret rotation.' -ForegroundColor DarkYellow
 } else {
     Write-Host "`nWait 5-10 min. Dashboard should show Online (not Building 24h)."
     Write-Host "Logs: railway logs --service $ServiceName --deployment --latest --lines 30"

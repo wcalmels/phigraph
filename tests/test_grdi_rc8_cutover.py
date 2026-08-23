@@ -7,6 +7,7 @@ import json
 import os
 import subprocess
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 from unittest import mock
 
@@ -51,7 +52,7 @@ def _write_manifest(tmp_path: Path, dsn: str, backup_path: Path, backup_sha256: 
         "database_identity_hash": load_cutover_module().database_identity_hash(dsn),
         "backup_path": str(backup_path),
         "backup_sha256": backup_sha256,
-        "backup_created_at": "2026-08-10T16:00:00+00:00",
+        "backup_created_at": datetime.now(timezone.utc).isoformat(),
         **extra,
     }
     path = tmp_path / "manifest.json"

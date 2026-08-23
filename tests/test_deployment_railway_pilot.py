@@ -1,4 +1,5 @@
 import os
+import shutil
 import subprocess
 from pathlib import Path
 
@@ -55,6 +56,10 @@ def test_build_core_service_passes_postgresql_settings(monkeypatch, tmp_path):
         "phigraph.deployment.core_service.CoreV3Service",
         FakeService,
     )
+    monkeypatch.setattr(
+        "phigraph.deployment.core_service._ensure_postgres_ready",
+        lambda _dsn: None,
+    )
     from phigraph.deployment.core_service import build_core_service
 
     settings = DeploymentSettings(
@@ -80,6 +85,14 @@ def test_reset_script_default_path_does_not_delete_service():
     assert guard_idx != -1, "service delete must be guarded by ConfirmServiceRecreation"
     assert "Get-Random" not in text
     assert "RandomNumberGenerator" in text
+
+    legacy_key_idx = text.index("PHIGRAPH_API_KEY --stdin")
+    recreation_guard_idx = text.rfind("if ($ConfirmServiceRecreation)", 0, legacy_key_idx)
+    assert recreation_guard_idx != -1, "legacy PHIGRAPH_API_KEY rotation must require ConfirmServiceRecreation"
+
+    signing_key_idx = text.index("PHIGRAPH_RECEIPT_SIGNING_KEY --stdin")
+    signing_guard_idx = text.rfind("if ($ConfirmServiceRecreation)", 0, signing_key_idx)
+    assert signing_guard_idx != -1, "receipt signing key rotation must require ConfirmServiceRecreation"
 
 
 def test_railway_env_example_has_no_jwt_or_oidc_docs():
@@ -108,8 +121,12 @@ foreach ($key in $keys) {
 }
 Write-Output 'ok'
 """
+    shell = shutil.which("pwsh") or shutil.which("powershell")
+    if shell is None:
+        pytest.skip("PowerShell runtime unavailable")
+
     result = subprocess.run(
-        ["powershell", "-NoProfile", "-Command", ps],
+        [shell, "-NoProfile", "-Command", ps],
         capture_output=True,
         text=True,
         check=False,
