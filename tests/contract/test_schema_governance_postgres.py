@@ -22,6 +22,15 @@ from phigraph.core_v3.schema_governance import (
 pytest.importorskip("psycopg")
 
 
+@pytest.fixture
+def isolated_postgres_schema(postgres_dsn):
+    reset_postgres_scoped_schema(postgres_dsn)
+    try:
+        yield postgres_dsn
+    finally:
+        reset_postgres_scoped_schema(postgres_dsn)
+
+
 def _admin_registry(admin_key: str) -> ApiKeyRegistry:
     payload = json.dumps(
         [
@@ -52,8 +61,8 @@ def _verifier_registry(verifier_key: str) -> ApiKeyRegistry:
     return ApiKeyRegistry.from_json(payload)
 
 
-def test_assess_compatible_on_fresh_database(postgres_dsn):
-    reset_postgres_scoped_schema(postgres_dsn)
+def test_assess_compatible_on_fresh_database(isolated_postgres_schema):
+    postgres_dsn = isolated_postgres_schema
     import psycopg
 
     with psycopg.connect(postgres_dsn) as conn:
@@ -64,7 +73,8 @@ def test_assess_compatible_on_fresh_database(postgres_dsn):
     assert len(report["migrations"]) == len(ORDERED_POSTGRES_MIGRATIONS)
 
 
-def test_assess_behind_when_only_first_migration(postgres_dsn):
+def test_assess_behind_when_only_first_migration(isolated_postgres_schema):
+    postgres_dsn = isolated_postgres_schema
     import psycopg
 
     drop_postgres_scoped_schema(postgres_dsn)
@@ -92,10 +102,10 @@ def test_assess_behind_when_only_first_migration(postgres_dsn):
     assert any(item["status"] == "missing" for item in report["migrations"])
 
 
-def test_assess_dirty_on_checksum_tamper(postgres_dsn):
+def test_assess_dirty_on_checksum_tamper(isolated_postgres_schema):
+    postgres_dsn = isolated_postgres_schema
     import psycopg
 
-    reset_postgres_scoped_schema(postgres_dsn)
     first_version = ORDERED_POSTGRES_MIGRATIONS[0][0]
     with psycopg.connect(postgres_dsn) as conn:
         conn.execute(
@@ -112,7 +122,8 @@ def test_assess_dirty_on_checksum_tamper(postgres_dsn):
     assert any(item["status"] == "checksum_mismatch" for item in report["migrations"])
 
 
-def test_admin_endpoint_requires_schema_read_permission(tmp_path, postgres_dsn):
+def test_admin_endpoint_requires_schema_read_permission(tmp_path, isolated_postgres_schema):
+    postgres_dsn = isolated_postgres_schema
     verifier_key = "verifier-schema-governance-key-32c"
     app = FastAPI()
     app.include_router(
@@ -132,8 +143,8 @@ def test_admin_endpoint_requires_schema_read_permission(tmp_path, postgres_dsn):
     assert response.json()["detail"] == "missing_permission:schema:read"
 
 
-def test_admin_endpoint_returns_redacted_compatible_report(tmp_path, postgres_dsn):
-    reset_postgres_scoped_schema(postgres_dsn)
+def test_admin_endpoint_returns_redacted_compatible_report(tmp_path, isolated_postgres_schema):
+    postgres_dsn = isolated_postgres_schema
     admin_key = "admin-schema-governance-key-32chars-min"
     app = FastAPI()
     app.include_router(
