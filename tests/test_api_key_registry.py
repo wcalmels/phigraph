@@ -9,6 +9,7 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
+from phigraph.core_v3.api import create_core_v3_router
 from phigraph.core_v3.api_key_registry import (
     ApiKeyRegistry,
     load_api_key_registry,
@@ -32,6 +33,7 @@ def _test_key(name: str) -> str:
 PROPOSER_KEY = _test_key("proposer")
 VERIFIER_KEY = _test_key("verifier")
 TENANT_B_KEY = _test_key("tenant-b")
+ADMIN_KEY = _test_key("admin")
 
 
 def _signed_hav_receipt(core: CoreV3Service, *, tenant: str, project: str) -> dict:
@@ -197,6 +199,82 @@ def test_load_api_key_registry_from_preset_env(monkeypatch):
     verifier = registry.resolve(VERIFIER_KEY)
     assert proposer is not None and proposer.subject == "release-agent"
     assert verifier is not None and verifier.role is Role.VERIFIER
+    assert registry.resolve(ADMIN_KEY) is None
+
+
+def test_load_api_key_registry_from_preset_env_with_optional_admin(monkeypatch):
+    monkeypatch.setenv("PHIGRAPH_API_KEY_PROPOSER", PROPOSER_KEY)
+    monkeypatch.setenv("PHIGRAPH_API_KEY_VERIFIER", VERIFIER_KEY)
+    monkeypatch.setenv("PHIGRAPH_API_KEY_TENANT_B", TENANT_B_KEY)
+    monkeypatch.setenv("PHIGRAPH_API_KEY_ADMIN", ADMIN_KEY)
+    monkeypatch.setenv("PHIGRAPH_PILOT_TENANT_A", "tenant-a")
+    monkeypatch.setenv("PHIGRAPH_PILOT_TENANT_B", "tenant-b")
+    monkeypatch.setenv("PHIGRAPH_PILOT_PROJECT", "project-a")
+    registry = load_api_key_registry()
+    assert registry is not None
+    admin = registry.resolve(ADMIN_KEY)
+    assert admin is not None
+    assert admin.role is Role.ADMIN
+    assert admin.subject == "schema-admin"
+
+
+def test_admin_key_alone_raises_incomplete_preset(monkeypatch):
+    monkeypatch.setenv("PHIGRAPH_API_KEY_ADMIN", ADMIN_KEY)
+    with pytest.raises(ValueError, match="pilot_preset_incomplete"):
+        validate_api_key_registry()
+
+
+def test_preset_rejects_admin_duplicate_of_proposer(monkeypatch):
+    monkeypatch.setenv("PHIGRAPH_API_KEY_PROPOSER", PROPOSER_KEY)
+    monkeypatch.setenv("PHIGRAPH_API_KEY_VERIFIER", VERIFIER_KEY)
+    monkeypatch.setenv("PHIGRAPH_API_KEY_TENANT_B", TENANT_B_KEY)
+    monkeypatch.setenv("PHIGRAPH_API_KEY_ADMIN", PROPOSER_KEY)
+    with pytest.raises(ValueError, match="duplicate_key"):
+        validate_api_key_registry()
+
+
+def test_schema_governance_endpoint_auth_on_non_postgres_backend(tmp_path):
+    registry = ApiKeyRegistry.from_json(
+        json.dumps(
+            [
+                {
+                    "key": ADMIN_KEY,
+                    "subject": "schema-admin",
+                    "role": "admin",
+                    "tenant_id": "tenant-a",
+                    "project_id": "project-a",
+                },
+                {
+                    "key": VERIFIER_KEY,
+                    "subject": "human-verifier",
+                    "role": "verifier",
+                    "tenant_id": "tenant-a",
+                    "project_id": "project-a",
+                },
+            ]
+        )
+    )
+    app = FastAPI()
+    app.include_router(
+        create_core_v3_router(
+            tmp_path,
+            backend="json",
+            api_key_registry=registry,
+        )
+    )
+    client = TestClient(app)
+
+    unknown = client.get("/v3/admin/schema-governance", headers={"X-API-Key": "unknown-key"})
+    assert unknown.status_code == 401
+    assert unknown.json()["detail"] == "invalid_api_key"
+
+    verifier = client.get("/v3/admin/schema-governance", headers={"X-API-Key": VERIFIER_KEY})
+    assert verifier.status_code == 403
+    assert verifier.json()["detail"] == "missing_permission:schema:read"
+
+    admin = client.get("/v3/admin/schema-governance", headers={"X-API-Key": ADMIN_KEY})
+    assert admin.status_code == 503
+    assert admin.json()["detail"] == "schema_governance_unavailable"
 
 
 def test_hav_registry_scope_from_server_identity_not_headers(tmp_path):

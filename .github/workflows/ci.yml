@@ -85,6 +85,7 @@ jobs:
             tests/contract/test_grdi_encapsulation.py \
             tests/contract/test_grdi_transactional_postgres.py \
             tests/contract/test_grdi_cutover_rc7.py \
+            tests/contract/test_schema_governance_postgres.py \
             tests/test_grdi_rc8_cutover.py -v
 
   package:

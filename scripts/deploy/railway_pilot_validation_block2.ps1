@@ -12,7 +12,7 @@
 
 .NOTES
   - Keys via Read-Host (hidden) or env: PHIGRAPH_API_KEY_PROPOSER, PHIGRAPH_API_KEY_VERIFIER,
-    PHIGRAPH_API_KEY_TENANT_B (legacy PHIGRAPH_API_KEY accepted for proposer-only mode).
+    PHIGRAPH_API_KEY_TENANT_B, PHIGRAPH_API_KEY_ADMIN (never extracted via railway run).
   - Never enables PHIGRAPH_TRUSTED_IDENTITY_HEADERS. Identity comes from server-side key registry.
   - No secrets written to disk. Output is redacted.
 #>
@@ -35,6 +35,7 @@ $EvidenceLog = [System.Collections.Generic.List[string]]::new()
 $flow = [pscustomobject]@{ Ok = $false }
 $replayId = $null
 $DualIdentityReady = $false
+$AdminKey = $null
 
 function Read-SecretKey {
     param([string]$Prompt)
@@ -73,6 +74,12 @@ function Get-Block2Keys {
     }
 }
 
+function Resolve-AdminKey {
+    $value = Get-OptionalSecretKey 'PHIGRAPH_API_KEY_ADMIN' 'PHIGRAPH_API_KEY_ADMIN'
+    if ($value) { return $value }
+    return Read-SecretKey 'PHIGRAPH_API_KEY_ADMIN'
+}
+
 function Get-GrdiIdentity {
     param([string]$ApiKey)
     return Invoke-PilotApi -Path '/v4/grdi/health' -Headers (New-Headers -ApiKey $ApiKey -TenantId $TenantA -ProjectId $Project -Subject 'identity-probe' -Role 'verifier') -ExpectStatus @(200)
@@ -84,7 +91,7 @@ function Redact-Text {
     $redacted = $Text
     $redacted = [regex]::Replace($redacted, '(?i)(x-api-key["\s:=]+)[^"\s,}]+', '$1[REDACTED]')
     $redacted = [regex]::Replace($redacted, '(?i)("(?:value|signature|key|token|receipt_signing_key)"\s*:\s*")[^"]+(")', '$1[REDACTED]$2')
-    $redacted = [regex]::Replace($redacted, '(?i)(PHIGRAPH_API_KEY(?:_(?:PROPOSER|VERIFIER|TENANT_B))?=)\S+', '$1[REDACTED]')
+    $redacted = [regex]::Replace($redacted, '(?i)(PHIGRAPH_API_KEY(?:_(?:PROPOSER|VERIFIER|TENANT_B|ADMIN))?=)\S+', '$1[REDACTED]')
     return $redacted
 }
 
@@ -370,8 +377,28 @@ try {
         Set-Gate 'G5' 'FAIL' "health/live HTTP $($live.Status)"
     }
 
-    # G4 - implicit: scoped writes succeed after bootstrap
-    Set-Gate 'G4' 'NOT_EVALUATED' 'schema version table not exposed via public API; inferred from successful scoped writes in G8/G9'
+    # G4 - schema governance admin endpoint (requires server-side admin identity)
+    if (-not $AdminKey) {
+        try {
+            $AdminKey = Resolve-AdminKey
+        } catch {
+            $AdminKey = $null
+        }
+    }
+    if (-not $AdminKey) {
+        Set-Gate 'G4' 'NOT_EVALUATED' 'requires PHIGRAPH_API_KEY_ADMIN on server (schema:read)'
+    } else {
+        $g4Headers = New-Headers -ApiKey $AdminKey -TenantId $TenantA -ProjectId $Project -Subject 'schema-admin' -Role 'admin'
+        $g4 = Invoke-PilotApi -Path '/v3/admin/schema-governance' -Headers $g4Headers -ExpectStatus @(200)
+        Write-Evidence "$(Get-Date -Format o) | schema_governance state=$($g4.Json.state) catalog_valid=$($g4.Json.catalog_valid)"
+        if ($g4.Ok -and $g4.Json.state -eq 'COMPATIBLE' -and $g4.Json.catalog_valid -eq $true) {
+            Set-Gate 'G4' 'PASS' 'schema governance COMPATIBLE; migration registry verified'
+        } elseif ($g4.Ok) {
+            Set-Gate 'G4' 'FAIL' "schema governance state=$($g4.Json.state) issues=$($g4.Json.issues -join ';')"
+        } else {
+            Set-Gate 'G4' 'FAIL' "schema governance HTTP $($g4.Status)"
+        }
+    }
 
     # G6 - auth negative
     $noKey = Invoke-PilotApi -Method Post -Path '/v3/hav/verify' -Headers @{
@@ -594,9 +621,11 @@ try {
     Remove-Item Env:PHIGRAPH_API_KEY_PROPOSER -ErrorAction SilentlyContinue
     Remove-Item Env:PHIGRAPH_API_KEY_VERIFIER -ErrorAction SilentlyContinue
     Remove-Item Env:PHIGRAPH_API_KEY_TENANT_B -ErrorAction SilentlyContinue
+    Remove-Item Env:PHIGRAPH_API_KEY_ADMIN -ErrorAction SilentlyContinue
     $ProposerKey = $null
     $VerifierKey = $null
     $TenantBKey = $null
+    $AdminKey = $null
 }
 
 Write-Host "`n== GATE REPORT (block 2) ==" -ForegroundColor Cyan

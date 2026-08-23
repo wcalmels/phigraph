@@ -1,4 +1,3 @@
-import os
 import shutil
 import subprocess
 from pathlib import Path
@@ -75,7 +74,40 @@ def test_build_core_service_passes_postgresql_settings(monkeypatch, tmp_path):
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 RESET_SCRIPT = REPO_ROOT / "scripts" / "deploy" / "railway_reset_api.ps1"
+BLOCK2_SCRIPT = REPO_ROOT / "scripts" / "deploy" / "railway_pilot_validation_block2.ps1"
 ENV_EXAMPLE = REPO_ROOT / "deploy" / "railway.env.example"
+
+
+def _extract_function_body(text: str, function_name: str) -> str:
+    marker = f"function {function_name} {{"
+    start = text.index(marker)
+    depth = 0
+    for index in range(start, len(text)):
+        char = text[index]
+        if char == "{":
+            depth += 1
+        elif char == "}":
+            depth -= 1
+            if depth == 0:
+                return text[start : index + 1]
+    raise AssertionError(f"unterminated function body: {function_name}")
+
+
+def _guarded_block(text: str, guard: str, needle: str) -> str:
+    needle_idx = text.index(needle)
+    guard_idx = text.rfind(guard, 0, needle_idx)
+    assert guard_idx != -1, f"{needle!r} must be guarded by {guard!r}"
+    block_start = text.index("{", guard_idx)
+    depth = 0
+    for index in range(block_start, len(text)):
+        char = text[index]
+        if char == "{":
+            depth += 1
+        elif char == "}":
+            depth -= 1
+            if depth == 0:
+                return text[guard_idx : index + 1]
+    raise AssertionError(f"unterminated guarded block for {guard!r}")
 
 
 def test_reset_script_default_path_does_not_delete_service():
@@ -86,13 +118,64 @@ def test_reset_script_default_path_does_not_delete_service():
     assert "Get-Random" not in text
     assert "RandomNumberGenerator" in text
 
-    legacy_key_idx = text.index("PHIGRAPH_API_KEY --stdin")
-    recreation_guard_idx = text.rfind("if ($ConfirmServiceRecreation)", 0, legacy_key_idx)
-    assert recreation_guard_idx != -1, "legacy PHIGRAPH_API_KEY rotation must require ConfirmServiceRecreation"
+    legacy_block = _guarded_block(
+        text,
+        "if ($ConfirmServiceRecreation)",
+        "Set-RailwaySecretVariable -Name 'PHIGRAPH_API_KEY' -Value $apiKey",
+    )
+    assert "PHIGRAPH_RECEIPT_SIGNING_KEY" in legacy_block
 
-    signing_key_idx = text.index("PHIGRAPH_RECEIPT_SIGNING_KEY --stdin")
-    signing_guard_idx = text.rfind("if ($ConfirmServiceRecreation)", 0, signing_key_idx)
-    assert signing_guard_idx != -1, "receipt signing key rotation must require ConfirmServiceRecreation"
+    default_block = _guarded_block(
+        text,
+        "} else {",
+        "Set-RailwaySecretVariable -Name 'PHIGRAPH_API_KEY_ADMIN' -Value $adminKey",
+    )
+    assert "PHIGRAPH_API_KEY_PROPOSER" not in default_block
+    assert "PHIGRAPH_API_KEY_VERIFIER" not in default_block
+    assert "PHIGRAPH_API_KEY_TENANT_B" not in default_block
+
+
+def test_reset_script_registry_rotation_requires_explicit_switch():
+    text = RESET_SCRIPT.read_text(encoding="utf-8")
+    assert "[switch]$RotateRegistryKeys" in text
+
+    rotation_block = _guarded_block(
+        text,
+        "if ($ConfirmServiceRecreation -or $RotateRegistryKeys)",
+        "Set-RailwaySecretVariable -Name 'PHIGRAPH_API_KEY_PROPOSER' -Value $proposerKey",
+    )
+    for name in (
+        "PHIGRAPH_API_KEY_PROPOSER",
+        "PHIGRAPH_API_KEY_VERIFIER",
+        "PHIGRAPH_API_KEY_TENANT_B",
+        "PHIGRAPH_API_KEY_ADMIN",
+    ):
+        assert name in rotation_block
+
+
+def test_reset_script_configures_admin_key_without_printing_secret():
+    text = RESET_SCRIPT.read_text(encoding="utf-8")
+    assert "Set-RailwaySecretVariable -Name 'PHIGRAPH_API_KEY_ADMIN'" in text
+    assert "Write-Host $adminKey" not in text
+    assert "Write-Host $AdminKey" not in text
+    assert "[Console]::Out.Write" not in text
+
+
+def test_block2_script_does_not_extract_admin_key_via_railway_run():
+    text = BLOCK2_SCRIPT.read_text(encoding="utf-8")
+    resolve_admin = _extract_function_body(text, "Resolve-AdminKey")
+    assert "railway run" not in resolve_admin.lower()
+    assert "[Console]::Out.Write" not in resolve_admin
+    assert "Get-OptionalSecretKey 'PHIGRAPH_API_KEY_ADMIN'" in resolve_admin
+    assert "Read-SecretKey 'PHIGRAPH_API_KEY_ADMIN'" in resolve_admin
+
+
+def test_block2_script_does_not_write_secrets_to_console():
+    text = BLOCK2_SCRIPT.read_text(encoding="utf-8")
+    assert "[Console]::Out.Write($env:PHIGRAPH_API_KEY" not in text
+    assert "[Console]::Out.Write(`$env:PHIGRAPH_API_KEY" not in text
+    assert "Write-Host $AdminKey" not in text
+    assert "Write-Host $ProposerKey" not in text
 
 
 def test_railway_env_example_has_no_jwt_or_oidc_docs():
@@ -133,3 +216,14 @@ Write-Output 'ok'
     )
     assert result.returncode == 0, result.stderr or result.stdout
     assert "ok" in result.stdout
+
+
+def test_block2_script_redacts_admin_key_assignment():
+    text = BLOCK2_SCRIPT.read_text(encoding="utf-8")
+    assert "PHIGRAPH_API_KEY_ADMIN" in text
+    assert "PHIGRAPH_API_KEY(?:_(?:PROPOSER|VERIFIER|TENANT_B|ADMIN))?=)" in text
+
+
+def test_railway_env_example_documents_admin_key_placeholder():
+    text = ENV_EXAMPLE.read_text(encoding="utf-8")
+    assert "PHIGRAPH_API_KEY_ADMIN=replace-with-admin-secret" in text

@@ -1,5 +1,4 @@
 from __future__ import annotations
-from phigraph.version import CORE_VERSION, PROTOCOL_LABEL
 
 from pathlib import Path
 from typing import Any, Callable
@@ -7,18 +6,49 @@ from typing import Any, Callable
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Response
 from pydantic import BaseModel, Field
 
+from phigraph.version import CORE_VERSION, PROTOCOL_LABEL
+
 from .adapters import AgentProposal, StaticAgentAdapter
 from .api_key_identity import ApiKeyIdentity
 from .api_key_registry import ApiKeyRegistry
 from .auth_deps import build_core_auth_dependencies
-from .models import ActionProposal, Claim, ClaimStatus, Evidence, EvidenceStatus, RuntimeMode, Verification
+from .backends import PostgreSQLLedgerBackend
+from .code_benchmark import (
+    AgentReport,
+    ModelRun,
+    MultiModelBenchmarkSuite,
+    PhiGraphCodeBenchmark,
+    RepositoryIndexer,
+    save_benchmark_report,
+)
+from .code_v38 import (
+    CommitSnapshotBuilder,
+    PatchEvaluator,
+    PatchProposal,
+    RequirementTraceBuilder,
+    benchmark_statistics,
+)
+from .code_v39 import (
+    CorpusTask,
+    DependencyInventory,
+    DeterministicSecurityScanner,
+    PatchQualityEvaluator,
+    ReproducibleCorpus,
+)
+from .github_readonly import GitHubReadOnlyConnector
+from .models import (
+    ActionProposal,
+    Claim,
+    ClaimStatus,
+    Evidence,
+    EvidenceStatus,
+    RuntimeMode,
+    Verification,
+)
+from .schema_governance import assess_postgres_schema_governance
 from .security import Principal
 from .service import CoreV3Service
 from .telemetry import TraceContext
-from .code_benchmark import AgentReport, PhiGraphCodeBenchmark, RepositoryIndexer, ModelRun, MultiModelBenchmarkSuite, save_benchmark_report
-from .github_readonly import GitHubReadOnlyConnector
-from .code_v38 import CommitSnapshotBuilder, RequirementTraceBuilder, PatchProposal, PatchEvaluator, benchmark_statistics
-from .code_v39 import ReproducibleCorpus, CorpusTask, DeterministicSecurityScanner, DependencyInventory, PatchQualityEvaluator
 
 
 class ClaimRequest(BaseModel):
@@ -492,5 +522,30 @@ def create_core_v3_router(
     @router.get("/ledger/snapshot")
     def ledger_snapshot(identity: Principal = Depends(require("read"))) -> dict[str, Any]:
         return service.ledger.snapshot(tenant_id=identity.tenant_id, project_id=identity.project_id)
+
+    @router.get("/admin/schema-governance")
+    def schema_governance(_: Principal = Depends(require("schema:read"))) -> dict[str, Any]:
+        metrics.inc("schema_governance.read")
+        if backend not in {"postgres", "postgresql"}:
+            raise HTTPException(status_code=503, detail="schema_governance_unavailable")
+        resolved_dsn = postgres_dsn
+        ledger_backend = service.ledger.backend
+        if resolved_dsn is None and isinstance(ledger_backend, PostgreSQLLedgerBackend):
+            resolved_dsn = ledger_backend.dsn
+        if not resolved_dsn:
+            raise HTTPException(status_code=503, detail="schema_governance_unavailable")
+        try:
+            import psycopg
+        except ImportError as exc:
+            raise HTTPException(status_code=503, detail="schema_governance_unavailable") from exc
+        try:
+            with psycopg.connect(resolved_dsn) as conn:
+                return assess_postgres_schema_governance(conn)
+        except Exception as exc:
+            metrics.inc("schema_governance.error")
+            raise HTTPException(
+                status_code=503,
+                detail=f"schema_governance_failed:{type(exc).__name__}",
+            ) from exc
 
     return router

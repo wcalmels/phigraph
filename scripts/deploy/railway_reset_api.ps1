@@ -3,9 +3,9 @@
 .SYNOPSIS
   Configure phigraph-api registry variables on the existing phigraph-private-pilot project.
 
-  By default, keeps the running service and only sets registry keys (_PROPOSER, _VERIFIER,
-  _TENANT_B) without rotating PHIGRAPH_API_KEY or PHIGRAPH_RECEIPT_SIGNING_KEY.
-  Service deletion/recreation and legacy secret rotation require -ConfirmServiceRecreation.
+  Default: provision only PHIGRAPH_API_KEY_ADMIN without rotating existing registry or legacy secrets.
+  -RotateRegistryKeys: rotate proposer, verifier, tenant-B and admin registry keys.
+  -ConfirmServiceRecreation: destructive factory reset plus legacy/signing rotation.
 
 .PREREQUISITE
   railway login
@@ -16,11 +16,15 @@
   .\scripts\deploy\railway_reset_api.ps1
 
 .EXAMPLE
+  .\scripts\deploy\railway_reset_api.ps1 -RotateRegistryKeys
+
+.EXAMPLE
   .\scripts\deploy\railway_reset_api.ps1 -ConfirmServiceRecreation
 #>
 [CmdletBinding()]
 param(
-    [switch]$ConfirmServiceRecreation
+    [switch]$ConfirmServiceRecreation,
+    [switch]$RotateRegistryKeys
 )
 
 Set-StrictMode -Version Latest
@@ -64,6 +68,17 @@ function New-RandomSecret {
     }
 }
 
+function Set-RailwaySecretVariable {
+    param(
+        [Parameter(Mandatory = $true)][string]$Name,
+        [Parameter(Mandatory = $true)][string]$Value
+    )
+    $Value | railway variable set $Name --stdin --service $ServiceName --skip-deploys
+    if ($LASTEXITCODE -ne 0) {
+        throw "$Name set failed"
+    }
+}
+
 $RepoRoot = Resolve-Path (Join-Path $PSScriptRoot '..\..')
 Set-Location $RepoRoot
 
@@ -75,6 +90,10 @@ Assert-RailwayCli
 $null = railway status 2>&1
 if ($LASTEXITCODE -ne 0) {
     throw "Not linked to a project. Run: railway link  (choose phigraph-private-pilot)"
+}
+
+if ($ConfirmServiceRecreation -and $RotateRegistryKeys) {
+    throw 'Use -ConfirmServiceRecreation for factory reset, or -RotateRegistryKeys for non-destructive registry rotation.'
 }
 
 if ($ConfirmServiceRecreation) {
@@ -97,61 +116,92 @@ if ($ConfirmServiceRecreation) {
     $stepPrefix = '[3/4]'
     $finalStep = '[4/4]'
 } else {
-    Write-Host "Configuring registry variables on existing '$ServiceName' (service and legacy secrets preserved)." -ForegroundColor Green
+    if ($RotateRegistryKeys) {
+        Write-Host "Rotating registry keys on existing '$ServiceName' (legacy secrets preserved)." -ForegroundColor Green
+    } else {
+        Write-Host "Provisioning PHIGRAPH_API_KEY_ADMIN on existing '$ServiceName' (all other secrets preserved)." -ForegroundColor Green
+    }
     $stepPrefix = '[1/2]'
     $finalStep = '[2/2]'
 }
 
-$proposerKey = New-RandomSecret
-$verifierKey = New-RandomSecret
-$tenantBKey = New-RandomSecret
+$proposerKey = $null
+$verifierKey = $null
+$tenantBKey = $null
+$adminKey = $null
 $apiKey = $null
 $receiptKey = $null
+
+if ($ConfirmServiceRecreation -or $RotateRegistryKeys) {
+    $proposerKey = New-RandomSecret
+    $verifierKey = New-RandomSecret
+    $tenantBKey = New-RandomSecret
+    $adminKey = New-RandomSecret
+} else {
+    $adminKey = New-RandomSecret
+}
+
 if ($ConfirmServiceRecreation) {
     $apiKey = New-RandomSecret
     $receiptKey = New-RandomSecret
 }
 
 Write-Host "$stepPrefix Setting variables..." -ForegroundColor Yellow
-$vars = @(
-    'PHIGRAPH_ENV=staging',
-    'PHIGRAPH_BACKEND=postgresql',
-    'PHIGRAPH_POSTGRES_DSN=${{Postgres.DATABASE_URL}}',
-    'PHIGRAPH_SHADOW_ONLY=true',
-    'PHIGRAPH_REAL_CONNECTORS_ENABLED=false',
-    'PHIGRAPH_DATA_DIR=/app/data',
-    'PHIGRAPH_LOG_LEVEL=INFO'
-)
-foreach ($pair in $vars) {
-    Invoke-Railway -CommandArgs @('variable', 'set', $pair, '--service', $ServiceName, '--skip-deploys')
+if ($ConfirmServiceRecreation) {
+    $vars = @(
+        'PHIGRAPH_ENV=staging',
+        'PHIGRAPH_BACKEND=postgresql',
+        'PHIGRAPH_POSTGRES_DSN=${{Postgres.DATABASE_URL}}',
+        'PHIGRAPH_SHADOW_ONLY=true',
+        'PHIGRAPH_REAL_CONNECTORS_ENABLED=false',
+        'PHIGRAPH_DATA_DIR=/app/data',
+        'PHIGRAPH_LOG_LEVEL=INFO'
+    )
+    foreach ($pair in $vars) {
+        Invoke-Railway -CommandArgs @('variable', 'set', $pair, '--service', $ServiceName, '--skip-deploys')
+    }
 }
+
 $prev = $ErrorActionPreference
 $ErrorActionPreference = 'Continue'
-$proposerKey | railway variable set PHIGRAPH_API_KEY_PROPOSER --stdin --service $ServiceName --skip-deploys
-if ($LASTEXITCODE -ne 0) { throw 'PHIGRAPH_API_KEY_PROPOSER set failed' }
-$verifierKey | railway variable set PHIGRAPH_API_KEY_VERIFIER --stdin --service $ServiceName --skip-deploys
-if ($LASTEXITCODE -ne 0) { throw 'PHIGRAPH_API_KEY_VERIFIER set failed' }
-$tenantBKey | railway variable set PHIGRAPH_API_KEY_TENANT_B --stdin --service $ServiceName --skip-deploys
-if ($LASTEXITCODE -ne 0) { throw 'PHIGRAPH_API_KEY_TENANT_B set failed' }
-if ($ConfirmServiceRecreation) {
-    $apiKey | railway variable set PHIGRAPH_API_KEY --stdin --service $ServiceName --skip-deploys
-    if ($LASTEXITCODE -ne 0) { throw 'PHIGRAPH_API_KEY set failed' }
-    $receiptKey | railway variable set PHIGRAPH_RECEIPT_SIGNING_KEY --stdin --service $ServiceName --skip-deploys
-    if ($LASTEXITCODE -ne 0) { throw 'PHIGRAPH_RECEIPT_SIGNING_KEY set failed' }
+try {
+    if ($ConfirmServiceRecreation -or $RotateRegistryKeys) {
+        Set-RailwaySecretVariable -Name 'PHIGRAPH_API_KEY_PROPOSER' -Value $proposerKey
+        Set-RailwaySecretVariable -Name 'PHIGRAPH_API_KEY_VERIFIER' -Value $verifierKey
+        Set-RailwaySecretVariable -Name 'PHIGRAPH_API_KEY_TENANT_B' -Value $tenantBKey
+        Set-RailwaySecretVariable -Name 'PHIGRAPH_API_KEY_ADMIN' -Value $adminKey
+    } else {
+        Set-RailwaySecretVariable -Name 'PHIGRAPH_API_KEY_ADMIN' -Value $adminKey
+    }
+
+    if ($ConfirmServiceRecreation) {
+        Set-RailwaySecretVariable -Name 'PHIGRAPH_API_KEY' -Value $apiKey
+        Set-RailwaySecretVariable -Name 'PHIGRAPH_RECEIPT_SIGNING_KEY' -Value $receiptKey
+    }
 }
-$ErrorActionPreference = $prev
+finally {
+    $ErrorActionPreference = $prev
+}
 
 if ($ConfirmServiceRecreation) {
     Write-Host "$finalStep Deploying from latest commit..." -ForegroundColor Yellow
     Invoke-Railway -CommandArgs @('redeploy', '--service', $ServiceName, '--from-source', '--yes')
 } else {
-    Write-Host "$finalStep Registry variables set with --skip-deploys. PHIGRAPH_API_KEY and PHIGRAPH_RECEIPT_SIGNING_KEY were not rotated." -ForegroundColor Yellow
+    Write-Host "$finalStep Registry variables set with --skip-deploys." -ForegroundColor Yellow
 }
 
 Write-Host "`n== DONE. Secrets were sent to Railway only (not printed). ==" -ForegroundColor Green
-Write-Host 'PHIGRAPH_API_KEY_PROPOSER configured'
-Write-Host 'PHIGRAPH_API_KEY_VERIFIER configured'
-Write-Host 'PHIGRAPH_API_KEY_TENANT_B configured'
+if ($ConfirmServiceRecreation -or $RotateRegistryKeys) {
+    Write-Host 'PHIGRAPH_API_KEY_PROPOSER configured'
+    Write-Host 'PHIGRAPH_API_KEY_VERIFIER configured'
+    Write-Host 'PHIGRAPH_API_KEY_TENANT_B configured'
+    Write-Host 'PHIGRAPH_API_KEY_ADMIN configured'
+} else {
+    Write-Host 'PHIGRAPH_API_KEY_ADMIN configured'
+    Write-Host 'PHIGRAPH_API_KEY_PROPOSER unchanged'
+    Write-Host 'PHIGRAPH_API_KEY_VERIFIER unchanged'
+    Write-Host 'PHIGRAPH_API_KEY_TENANT_B unchanged'
+}
 if ($ConfirmServiceRecreation) {
     Write-Host 'PHIGRAPH_API_KEY configured'
     Write-Host 'PHIGRAPH_RECEIPT_SIGNING_KEY configured'
@@ -160,15 +210,18 @@ if ($ConfirmServiceRecreation) {
     Write-Host 'PHIGRAPH_RECEIPT_SIGNING_KEY unchanged'
 }
 Write-Host 'Retrieve values from Railway Variables UI. Never paste secrets in chat, logs, or transcripts.' -ForegroundColor Yellow
-if (-not $ConfirmServiceRecreation) {
-    Write-Host 'Service was not deleted. Use -ConfirmServiceRecreation only for destructive factory reset and legacy secret rotation.' -ForegroundColor DarkYellow
-} else {
+if ($ConfirmServiceRecreation) {
     Write-Host "`nWait 5-10 min. Dashboard should show Online (not Building 24h)."
     Write-Host "Logs: railway logs --service $ServiceName --deployment --latest --lines 30"
+} elseif ($RotateRegistryKeys) {
+    Write-Host 'Service was not deleted. Use -ConfirmServiceRecreation only for destructive factory reset and legacy secret rotation.' -ForegroundColor DarkYellow
+} else {
+    Write-Host 'Use -RotateRegistryKeys to rotate proposer, verifier, tenant-B and admin keys explicitly.' -ForegroundColor DarkYellow
 }
 
 $apiKey = $null
 $proposerKey = $null
 $verifierKey = $null
 $tenantBKey = $null
+$adminKey = $null
 $receiptKey = $null
