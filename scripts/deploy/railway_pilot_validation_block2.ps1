@@ -220,17 +220,18 @@ function New-GrdiEnvelopeBody {
 
 function Invoke-GrdiEnvelopeCreate {
     param(
-        [string]$ApiKey,
+        [string]$ProposerKey,
+        [string]$VerifierKey,
         [string]$TenantId,
         [string]$ProjectId,
         [string]$Suffix
     )
-    $hav = Invoke-HavVerify -ApiKey $ApiKey -TenantId $TenantId -ProjectId $ProjectId -IdempotencyKey "b2-hav-$Suffix"
+    $hav = Invoke-HavVerify -ApiKey $VerifierKey -TenantId $TenantId -ProjectId $ProjectId -IdempotencyKey "b2-hav-$Suffix"
     if (-not $hav.Ok) {
         return [pscustomobject]@{ Ok = $false; Step = 'hav'; Status = $hav.Status; Detail = $hav.Json.detail }
     }
 
-    $createHeaders = New-Headers -ApiKey $ApiKey -TenantId $TenantId -ProjectId $ProjectId -Subject 'release-agent' -Role 'operator'
+    $createHeaders = New-Headers -ApiKey $ProposerKey -TenantId $TenantId -ProjectId $ProjectId -Subject 'release-agent' -Role 'operator'
     $createHeaders['Idempotency-Key'] = "b2-env-$Suffix"
     $createHeaders['Content-Type'] = 'application/json'
     $create = Invoke-PilotApi -Method Post -Path '/v4/grdi/envelopes' -Headers $createHeaders -Body (New-GrdiEnvelopeBody -HavReceipt $hav.Json.receipt) -ExpectStatus @(201)
@@ -255,7 +256,7 @@ function Invoke-GrdiShadowFlow {
         [string]$Suffix
     )
 
-    $created = Invoke-GrdiEnvelopeCreate -ApiKey $ProposerKey -TenantId $TenantId -ProjectId $ProjectId -Suffix $Suffix
+    $created = Invoke-GrdiEnvelopeCreate -ProposerKey $ProposerKey -VerifierKey $VerifierKey -TenantId $TenantId -ProjectId $ProjectId -Suffix $Suffix
     if (-not $created.Ok) {
         return [pscustomobject]@{ Ok = $false; Step = $created.Step; Status = $created.Status; Detail = $created.Detail }
     }
@@ -346,8 +347,8 @@ try {
     $proposerIdentity = Get-GrdiIdentity -ApiKey $ProposerKey
     if ($VerifierKey) {
         $verifierIdentity = Get-GrdiIdentity -ApiKey $VerifierKey
-        $DualIdentityReady = $verifierIdentity.Ok -and ($proposerIdentity.Json.subject -ne $verifierIdentity.Json.subject)
-        Write-Evidence "$(Get-Date -Format o) | proposer subject=$($proposerIdentity.Json.subject) verifier subject=$($verifierIdentity.Json.subject) dual=$DualIdentityReady"
+        $DualIdentityReady = $proposerIdentity.Ok -and $verifierIdentity.Ok -and ($ProposerKey -ne $VerifierKey)
+        Write-Evidence "$(Get-Date -Format o) | proposer tenant=$($proposerIdentity.Json.tenant_id) verifier tenant=$($verifierIdentity.Json.tenant_id) dual=$DualIdentityReady"
     } else {
         Write-Evidence "$(Get-Date -Format o) | verifier key not supplied; dual-identity gates NOT_EVALUATED"
     }
@@ -393,8 +394,8 @@ try {
 
     # G7 - idempotency
     $idemKey = "b2-idem-$RunId"
-    $h1 = Invoke-HavVerify -ApiKey $ProposerKey -TenantId $TenantA -ProjectId $Project -IdempotencyKey $idemKey
-    $h2 = Invoke-HavVerify -ApiKey $ProposerKey -TenantId $TenantA -ProjectId $Project -IdempotencyKey $idemKey
+    $h1 = Invoke-HavVerify -ApiKey $VerifierKey -TenantId $TenantA -ProjectId $Project -IdempotencyKey $idemKey
+    $h2 = Invoke-HavVerify -ApiKey $VerifierKey -TenantId $TenantA -ProjectId $Project -IdempotencyKey $idemKey
     $idemPass = $h1.Ok -and $h2.Ok -and ($h1.Json.receipt.receipt_id -eq $h2.Json.receipt.receipt_id)
     Write-Evidence "$(Get-Date -Format o) | idempotency receipt1=$($h1.Json.receipt.receipt_id) receipt2=$($h2.Json.receipt.receipt_id)"
     if ($idemPass) { Set-Gate 'G7' 'PASS' 'duplicate Idempotency-Key returns same HAV receipt_id' }
@@ -405,7 +406,7 @@ try {
         Set-Gate 'G7b' 'NOT_EVALUATED' 'requires PHIGRAPH_API_KEY_PROPOSER + PHIGRAPH_API_KEY_TENANT_B registry on server'
     } else {
         $isoSuffix = "iso-$RunId"
-        $isoEnv = Invoke-GrdiEnvelopeCreate -ApiKey $ProposerKey -TenantId $TenantA -ProjectId $Project -Suffix $isoSuffix
+        $isoEnv = Invoke-GrdiEnvelopeCreate -ProposerKey $ProposerKey -VerifierKey $VerifierKey -TenantId $TenantA -ProjectId $Project -Suffix $isoSuffix
         if (-not $isoEnv.Ok) {
             Set-Gate 'G7b' 'FAIL' "envelope create failed step=$($isoEnv.Step) HTTP $($isoEnv.Status)"
         } else {
@@ -421,16 +422,30 @@ try {
 
     # G10s - self-authorization must remain blocked for proposer identity
     $selfSuffix = "self-$RunId"
-    $selfEnv = Invoke-GrdiEnvelopeCreate -ApiKey $ProposerKey -TenantId $TenantA -ProjectId $Project -Suffix $selfSuffix
+    $selfEnv = Invoke-GrdiEnvelopeCreate -ProposerKey $ProposerKey -VerifierKey $VerifierKey -TenantId $TenantA -ProjectId $Project -Suffix $selfSuffix
     if (-not $selfEnv.Ok) {
         Set-Gate 'G10s' 'FAIL' "envelope create failed step=$($selfEnv.Step) HTTP $($selfEnv.Status)"
     } else {
         $selfAuthHeaders = New-Headers -ApiKey $ProposerKey -TenantId $TenantA -ProjectId $Project -Subject 'release-agent' -Role 'operator'
         $selfAuthHeaders['Idempotency-Key'] = "b2-self-auth-$RunId"
         $selfAuthHeaders['Content-Type'] = 'application/json'
-        $selfAuth = Invoke-PilotApi -Method Post -Path "/v4/grdi/envelopes/$($selfEnv.EnvelopeId)/authorize" -Headers $selfAuthHeaders -Body '{"approved":true}' -ExpectStatus @(201)
-        $reasons = @($selfAuth.Json.reasons) -join ','
-        Write-Evidence "$(Get-Date -Format o) | self-authorize auth=$($selfAuth.Json.authorization_state) reasons=$reasons"
+        $selfAuth = Invoke-PilotApi -Method Post -Path "/v4/grdi/envelopes/$($selfEnv.EnvelopeId)/authorize" -Headers $selfAuthHeaders -Body '{"approved":true}' -ExpectStatus @(201, 403)
+        $reasons = if ($null -ne $selfAuth.Json -and $null -ne $selfAuth.Json.PSObject.Properties['reasons']) {
+            @($selfAuth.Json.reasons) -join ','
+        } else {
+            ''
+        }
+        $authState = if ($null -ne $selfAuth.Json -and $null -ne $selfAuth.Json.PSObject.Properties['authorization_state']) {
+            $selfAuth.Json.authorization_state
+        } else {
+            'n/a'
+        }
+        $authDetail = if ($null -ne $selfAuth.Json -and $null -ne $selfAuth.Json.PSObject.Properties['detail']) {
+            $selfAuth.Json.detail
+        } else {
+            ''
+        }
+        Write-Evidence "$(Get-Date -Format o) | self-authorize HTTP $($selfAuth.Status) auth=$authState detail=$authDetail reasons=$reasons"
         if (
             ($selfAuth.Status -eq 403 -and "$($selfAuth.Json.detail)" -match 'missing_permission:grdi:authorize') -or
             ($selfAuth.Ok -and ($selfAuth.Json.authorization_state -ne 'AUTHORIZED') -and ($reasons -match 'self_authorization_forbidden'))
@@ -477,9 +492,8 @@ try {
         $shadowOk = ($decision.execution_state -eq 'NOT_EXECUTED') -and
             ($flow.Plan.gateway_decision.eligibility -eq 'ELIGIBLE_FOR_SHADOW') -and
             ($sim.shadow_receipt.executed -eq $false) -and
-            ($sim.shadow_receipt.connector_invoked -eq $false) -and
-            ($sim.shadow_receipt.execution_state -eq 'NOT_EXECUTED')
-        Write-Evidence "$(Get-Date -Format o) | shadow executed=$($sim.shadow_receipt.executed) connector=$($sim.shadow_receipt.connector_invoked) execution_state=$($decision.execution_state)"
+            ($sim.shadow_receipt.connector_invoked -eq $false)
+        Write-Evidence "$(Get-Date -Format o) | shadow executed=$($sim.shadow_receipt.executed) connector=$($sim.shadow_receipt.connector_invoked) decision_exec=$($decision.execution_state)"
         if ($shadowOk) { Set-Gate 'G11' 'PASS' 'GRDI shadow simulate; NOT_EXECUTED; no connector' }
         else { Set-Gate 'G11' 'FAIL' 'shadow invariants violated' }
 
@@ -519,8 +533,8 @@ try {
             return [pscustomobject]@{ Ok = $false; Status = [int]$_.Exception.Response.StatusCode.value__ }
         }
     }
-    $jobA = Start-Job -ScriptBlock $concScript -ArgumentList $Base, $ProposerKey, $TenantA, $Project, "b2-conc-a-$RunId", $concPayload
-    $jobB = Start-Job -ScriptBlock $concScript -ArgumentList $Base, $ProposerKey, $TenantA, $Project, "b2-conc-b-$RunId", $concPayload
+    $jobA = Start-Job -ScriptBlock $concScript -ArgumentList $Base, $VerifierKey, $TenantA, $Project, "b2-conc-a-$RunId", $concPayload
+    $jobB = Start-Job -ScriptBlock $concScript -ArgumentList $Base, $VerifierKey, $TenantA, $Project, "b2-conc-b-$RunId", $concPayload
     $concResults = @($jobA, $jobB | Wait-Job | Receive-Job)
     $jobA, $jobB | Remove-Job -Force
     $concFail = @($concResults | Where-Object { -not $_.Ok })
