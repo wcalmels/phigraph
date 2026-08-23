@@ -33,7 +33,7 @@ _PERMISSIONS = {
             "grdi:compare",
         }
     ),
-    Role.ADMIN: frozenset({"*"}),
+    Role.ADMIN: frozenset({"*", "schema:read"}),
 }
 
 

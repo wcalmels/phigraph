@@ -4,7 +4,7 @@
   Configure phigraph-api registry variables on the existing phigraph-private-pilot project.
 
   By default, keeps the running service and only sets registry keys (_PROPOSER, _VERIFIER,
-  _TENANT_B) without rotating PHIGRAPH_API_KEY or PHIGRAPH_RECEIPT_SIGNING_KEY.
+  _TENANT_B, _ADMIN) without rotating PHIGRAPH_API_KEY or PHIGRAPH_RECEIPT_SIGNING_KEY.
   Service deletion/recreation and legacy secret rotation require -ConfirmServiceRecreation.
 
 .PREREQUISITE
@@ -105,6 +105,7 @@ if ($ConfirmServiceRecreation) {
 $proposerKey = New-RandomSecret
 $verifierKey = New-RandomSecret
 $tenantBKey = New-RandomSecret
+$adminKey = New-RandomSecret
 $apiKey = $null
 $receiptKey = $null
 if ($ConfirmServiceRecreation) {
@@ -133,6 +134,8 @@ $verifierKey | railway variable set PHIGRAPH_API_KEY_VERIFIER --stdin --service 
 if ($LASTEXITCODE -ne 0) { throw 'PHIGRAPH_API_KEY_VERIFIER set failed' }
 $tenantBKey | railway variable set PHIGRAPH_API_KEY_TENANT_B --stdin --service $ServiceName --skip-deploys
 if ($LASTEXITCODE -ne 0) { throw 'PHIGRAPH_API_KEY_TENANT_B set failed' }
+$adminKey | railway variable set PHIGRAPH_API_KEY_ADMIN --stdin --service $ServiceName --skip-deploys
+if ($LASTEXITCODE -ne 0) { throw 'PHIGRAPH_API_KEY_ADMIN set failed' }
 if ($ConfirmServiceRecreation) {
     $apiKey | railway variable set PHIGRAPH_API_KEY --stdin --service $ServiceName --skip-deploys
     if ($LASTEXITCODE -ne 0) { throw 'PHIGRAPH_API_KEY set failed' }
@@ -152,6 +155,7 @@ Write-Host "`n== DONE. Secrets were sent to Railway only (not printed). ==" -For
 Write-Host 'PHIGRAPH_API_KEY_PROPOSER configured'
 Write-Host 'PHIGRAPH_API_KEY_VERIFIER configured'
 Write-Host 'PHIGRAPH_API_KEY_TENANT_B configured'
+Write-Host 'PHIGRAPH_API_KEY_ADMIN configured'
 if ($ConfirmServiceRecreation) {
     Write-Host 'PHIGRAPH_API_KEY configured'
     Write-Host 'PHIGRAPH_RECEIPT_SIGNING_KEY configured'
@@ -171,4 +175,5 @@ $apiKey = $null
 $proposerKey = $null
 $verifierKey = $null
 $tenantBKey = $null
+$adminKey = $null
 $receiptKey = $null

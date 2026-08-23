@@ -149,14 +149,16 @@ def load_api_key_registry() -> ApiKeyRegistry | None:
        - ``PHIGRAPH_API_KEY_PROPOSER`` (operator, tenant A)
        - ``PHIGRAPH_API_KEY_VERIFIER`` (verifier, tenant A)
        - ``PHIGRAPH_API_KEY_TENANT_B`` (verifier, tenant B)
+       - ``PHIGRAPH_API_KEY_ADMIN`` (optional admin for schema governance; requires full base preset)
     """
     raw = os.getenv("PHIGRAPH_API_KEY_REGISTRY", "").strip()
     if raw:
         return ApiKeyRegistry.from_json(raw)
 
     preset_values = {name: os.getenv(name, "").strip() for name in PILOT_KEY_ENVS}
+    admin_value = os.getenv("PHIGRAPH_API_KEY_ADMIN", "").strip()
     configured = [name for name, value in preset_values.items() if value]
-    if not configured:
+    if not configured and not admin_value:
         return None
     if len(configured) != len(PILOT_KEY_ENVS):
         raise ValueError("api_key_registry_pilot_preset_incomplete")
@@ -188,8 +190,17 @@ def load_api_key_registry() -> ApiKeyRegistry | None:
             project_id=project,
         ),
     ]
-    entries = tuple(entry for entry in preset_entries if entry is not None)
-    return ApiKeyRegistry.from_entries(entries)
+    entries = [entry for entry in preset_entries if entry is not None]
+    admin_entry = _entry_from_env(
+        "PHIGRAPH_API_KEY_ADMIN",
+        subject="schema-admin",
+        role=Role.ADMIN,
+        tenant_id=tenant_a,
+        project_id=project,
+    )
+    if admin_entry is not None:
+        entries.append(admin_entry)
+    return ApiKeyRegistry.from_entries(tuple(entries))
 
 
 def validate_api_key_registry() -> ApiKeyRegistry | None:

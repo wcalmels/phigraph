@@ -1,4 +1,3 @@
-import os
 import shutil
 import subprocess
 from pathlib import Path
@@ -133,3 +132,26 @@ Write-Output 'ok'
     )
     assert result.returncode == 0, result.stderr or result.stdout
     assert "ok" in result.stdout
+
+
+def test_reset_script_configures_admin_key_without_printing_secret():
+    text = RESET_SCRIPT.read_text(encoding="utf-8")
+    admin_idx = text.index("PHIGRAPH_API_KEY_ADMIN --stdin")
+    legacy_api_idx = text.index("PHIGRAPH_API_KEY --stdin")
+    legacy_guard_idx = text.rfind("if ($ConfirmServiceRecreation)", 0, legacy_api_idx)
+    assert legacy_guard_idx != -1, "legacy PHIGRAPH_API_KEY rotation must require ConfirmServiceRecreation"
+    assert admin_idx < legacy_guard_idx, "admin key must be configured in default non-destructive mode"
+    assert "Write-Host $adminKey" not in text
+    assert "Write-Host $AdminKey" not in text
+
+
+def test_railway_env_example_documents_admin_key_placeholder():
+    text = ENV_EXAMPLE.read_text(encoding="utf-8")
+    assert "PHIGRAPH_API_KEY_ADMIN=replace-with-admin-secret" in text
+
+
+def test_block2_script_redacts_admin_key_assignment():
+    block2 = REPO_ROOT / "scripts" / "deploy" / "railway_pilot_validation_block2.ps1"
+    text = block2.read_text(encoding="utf-8")
+    assert "PHIGRAPH_API_KEY_ADMIN" in text
+    assert "PHIGRAPH_API_KEY(?:_(?:PROPOSER|VERIFIER|TENANT_B|ADMIN))?=)" in text
