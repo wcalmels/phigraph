@@ -1,4 +1,6 @@
 import os
+import subprocess
+from pathlib import Path
 
 import pytest
 
@@ -64,3 +66,53 @@ def test_build_core_service_passes_postgresql_settings(monkeypatch, tmp_path):
     build_core_service(settings)
     assert captured["backend"] == "postgresql"
     assert captured["postgres_dsn"] == "postgresql://example.invalid/db"
+
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
+RESET_SCRIPT = REPO_ROOT / "scripts" / "deploy" / "railway_reset_api.ps1"
+ENV_EXAMPLE = REPO_ROOT / "deploy" / "railway.env.example"
+
+
+def test_reset_script_default_path_does_not_delete_service():
+    text = RESET_SCRIPT.read_text(encoding="utf-8")
+    delete_idx = text.index("'service', 'delete'")
+    guard_idx = text.rfind("if ($ConfirmServiceRecreation)", 0, delete_idx)
+    assert guard_idx != -1, "service delete must be guarded by ConfirmServiceRecreation"
+    assert "Get-Random" not in text
+    assert "RandomNumberGenerator" in text
+
+
+def test_railway_env_example_has_no_jwt_or_oidc_docs():
+    text = ENV_EXAMPLE.read_text(encoding="utf-8")
+    assert "PHIGRAPH_JWT_" not in text
+    assert "PHIGRAPH_OIDC_" not in text
+
+
+def test_new_random_secret_generates_distinct_high_entropy_values():
+    ps = """
+function New-RandomSecret {
+    $bytes = New-Object byte[] 48
+    $rng = [System.Security.Cryptography.RandomNumberGenerator]::Create()
+    try {
+        $rng.GetBytes($bytes)
+        return [Convert]::ToBase64String($bytes)
+    }
+    finally {
+        $rng.Dispose()
+    }
+}
+$keys = 1..3 | ForEach-Object { New-RandomSecret }
+if ($keys[0] -eq $keys[1] -or $keys[1] -eq $keys[2] -or $keys[0] -eq $keys[2]) { throw 'duplicate secret generated' }
+foreach ($key in $keys) {
+    if ($key.Length -lt 32) { throw "secret too short: $($key.Length)" }
+}
+Write-Output 'ok'
+"""
+    result = subprocess.run(
+        ["powershell", "-NoProfile", "-Command", ps],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr or result.stdout
+    assert "ok" in result.stdout

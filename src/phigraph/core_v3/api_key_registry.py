@@ -8,6 +8,14 @@ from dataclasses import dataclass
 from .api_key_identity import ApiKeyIdentity
 from .security import Role
 
+MIN_KEY_LENGTH = 32
+REQUIRED_JSON_FIELDS = ("key", "subject", "role", "tenant_id", "project_id")
+PILOT_KEY_ENVS = (
+    "PHIGRAPH_API_KEY_PROPOSER",
+    "PHIGRAPH_API_KEY_VERIFIER",
+    "PHIGRAPH_API_KEY_TENANT_B",
+)
+
 
 @dataclass(frozen=True)
 class RegisteredApiKey:
@@ -47,6 +55,8 @@ class ApiKeyRegistry:
         for entry in entries:
             if not entry.key:
                 raise ValueError("api_key_registry_empty_key")
+            if len(entry.key) < MIN_KEY_LENGTH:
+                raise ValueError("api_key_registry_key_too_short")
             if entry.key in seen:
                 raise ValueError("api_key_registry_duplicate_key")
             seen.add(entry.key)
@@ -70,16 +80,25 @@ class ApiKeyRegistry:
         for index, item in enumerate(payload):
             if not isinstance(item, dict):
                 raise ValueError(f"api_key_registry_entry_{index}_must_be_object")
-            key = str(item.get("key", "")).strip()
+            for field in REQUIRED_JSON_FIELDS:
+                if field not in item:
+                    raise ValueError(f"api_key_registry_entry_{index}_missing_{field}")
+            key = str(item["key"]).strip()
             if not key:
                 raise ValueError(f"api_key_registry_entry_{index}_missing_key")
+            subject = str(item["subject"]).strip()
+            if not subject:
+                raise ValueError(f"api_key_registry_entry_{index}_missing_subject")
+            tenant_id = str(item["tenant_id"]).strip()
+            if not tenant_id:
+                raise ValueError(f"api_key_registry_entry_{index}_missing_tenant_id")
+            project_id = str(item["project_id"]).strip()
+            if not project_id:
+                raise ValueError(f"api_key_registry_entry_{index}_missing_project_id")
             try:
-                role = Role(str(item.get("role", "viewer")))
+                role = Role(str(item["role"]))
             except ValueError as exc:
                 raise ValueError(f"api_key_registry_entry_{index}_invalid_role") from exc
-            subject = str(item.get("subject", "api-key-client")).strip() or "api-key-client"
-            tenant_id = str(item.get("tenant_id", "default")).strip() or "default"
-            project_id = str(item.get("project_id", "default")).strip() or "default"
             issuer = str(item.get("issuer", "api-key-registry")).strip() or "api-key-registry"
             entries.append(
                 RegisteredApiKey(
@@ -134,6 +153,13 @@ def load_api_key_registry() -> ApiKeyRegistry | None:
     raw = os.getenv("PHIGRAPH_API_KEY_REGISTRY", "").strip()
     if raw:
         return ApiKeyRegistry.from_json(raw)
+
+    preset_values = {name: os.getenv(name, "").strip() for name in PILOT_KEY_ENVS}
+    configured = [name for name, value in preset_values.items() if value]
+    if not configured:
+        return None
+    if len(configured) != len(PILOT_KEY_ENVS):
+        raise ValueError("api_key_registry_pilot_preset_incomplete")
 
     tenant_a = os.getenv("PHIGRAPH_PILOT_TENANT_A", "pilot-b2-tenant-a").strip() or "pilot-b2-tenant-a"
     tenant_b = os.getenv("PHIGRAPH_PILOT_TENANT_B", "pilot-b2-tenant-b").strip() or "pilot-b2-tenant-b"
