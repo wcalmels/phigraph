@@ -38,6 +38,34 @@ def _frames(payload: dict[str, list[dict]]) -> dict[str, pd.DataFrame]:
     }
 
 
+def evaluate_readiness_health(checks: dict[str, object]) -> bool:
+    nested_checks = checks.get("checks")
+    disk_ok = (
+        isinstance(nested_checks, dict)
+        and nested_checks.get("data_path_writable") is True
+        and nested_checks.get("free_disk_ok") is True
+    )
+    postgres_check = checks.get("postgres")
+    postgres_ok = (
+        postgres_check is None
+        or (
+            isinstance(postgres_check, dict)
+            and postgres_check.get("status") == "ok"
+        )
+    )
+    return disk_ok and postgres_ok
+
+
+def build_readiness_checks(settings: DeploymentSettings) -> dict[str, object]:
+    checks: dict[str, object] = run_health_checks(data_path=settings.data_dir).to_dict()
+    if settings.core_backend in {"postgres", "postgresql"}:
+        if not settings.postgres_dsn:
+            checks["postgres"] = {"status": "error", "reason": "dsn_not_configured"}
+        else:
+            checks["postgres"] = check_postgres_connectivity(settings.postgres_dsn)
+    return checks
+
+
 def create_app(
     settings: DeploymentSettings | None = None,
 ) -> FastAPI:
@@ -73,27 +101,12 @@ def create_app(
         )
 
     def _readiness_checks() -> dict[str, object]:
-        checks: dict[str, object] = run_health_checks(data_path=settings.data_dir).to_dict()
-        if settings.core_backend in {"postgres", "postgresql"}:
-            if not settings.postgres_dsn:
-                checks["postgres"] = {"status": "error", "reason": "dsn_not_configured"}
-            else:
-                checks["postgres"] = check_postgres_connectivity(settings.postgres_dsn)
-        return checks
+        return build_readiness_checks(settings)
 
     @app.get("/ready", response_model=HealthResponse)
     def ready() -> HealthResponse:
         checks = _readiness_checks()
-        disk_ok = bool(checks.get("data_path_writable")) and bool(checks.get("free_disk_ok"))
-        postgres_check = checks.get("postgres")
-        postgres_ok = (
-            postgres_check is None
-            or (
-                isinstance(postgres_check, dict)
-                and postgres_check.get("status") == "ok"
-            )
-        )
-        healthy = disk_ok and postgres_ok
+        healthy = evaluate_readiness_health(checks)
         status = "ready" if healthy else "not_ready"
         code = 200 if healthy else 503
         response = HealthResponse(
