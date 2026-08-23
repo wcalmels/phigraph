@@ -12,7 +12,7 @@
 
 .NOTES
   - Keys via Read-Host (hidden) or env: PHIGRAPH_API_KEY_PROPOSER, PHIGRAPH_API_KEY_VERIFIER,
-    PHIGRAPH_API_KEY_TENANT_B, PHIGRAPH_API_KEY_ADMIN (legacy PHIGRAPH_API_KEY accepted for proposer-only mode).
+    PHIGRAPH_API_KEY_TENANT_B, PHIGRAPH_API_KEY_ADMIN (never extracted via railway run).
   - Never enables PHIGRAPH_TRUSTED_IDENTITY_HEADERS. Identity comes from server-side key registry.
   - No secrets written to disk. Output is redacted.
 #>
@@ -77,19 +77,6 @@ function Get-Block2Keys {
 function Resolve-AdminKey {
     $value = Get-OptionalSecretKey 'PHIGRAPH_API_KEY_ADMIN' 'PHIGRAPH_API_KEY_ADMIN'
     if ($value) { return $value }
-
-    if (Get-Command railway -ErrorAction SilentlyContinue) {
-        $prev = $ErrorActionPreference
-        $ErrorActionPreference = 'SilentlyContinue'
-        try {
-            $raw = railway run --service phigraph-api -- powershell -NoProfile -Command "if (`$env:PHIGRAPH_API_KEY_ADMIN) { [Console]::Out.Write(`$env:PHIGRAPH_API_KEY_ADMIN) }" 2>$null
-            $candidate = ($raw | Out-String).Trim()
-            if ($candidate) { return $candidate }
-        } finally {
-            $ErrorActionPreference = $prev
-        }
-    }
-
     return Read-SecretKey 'PHIGRAPH_API_KEY_ADMIN'
 }
 
@@ -351,7 +338,6 @@ Write-Evidence "$(Get-Date -Format o) | block2 start"
 $Keys = Get-Block2Keys
 $ProposerKey = $Keys.Proposer
 $VerifierKey = $Keys.Verifier
-$TenantBKey = $Keys.TenantB
 $TenantBKey = $Keys.TenantB
 
 try {
