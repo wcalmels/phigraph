@@ -12,7 +12,13 @@ import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
 RUNNER = ROOT / "scripts" / "deploy" / "railway_g14_live_runner.ps1"
+WRAPPER = ROOT / "scripts" / "deploy" / "railway_g14_backup_restore.ps1"
 PINNED_COMMIT = "e805f969421fc0392632365df998d0a248fc9d97"
+G14_EXIT_OK = 0
+G14_EXIT_PRECONDITION = 2
+G14_EXIT_CONFLICT = 3
+G14_EXIT_VERIFY_FAIL = 4
+WINDOWS_PS51 = Path(os.environ.get("SystemRoot", r"C:\Windows")) / "System32" / "WindowsPowerShell" / "v1.0" / "powershell.exe"
 FORBIDDEN_INVOCATIONS = (
     "powershell -Command",
     "pwsh -Command",
@@ -42,6 +48,12 @@ def _powershell() -> str:
     if shell is None:
         pytest.skip("PowerShell runtime unavailable")
     return shell
+
+
+def _windows_powershell_51() -> str:
+    if not WINDOWS_PS51.is_file():
+        pytest.skip("Windows PowerShell 5.1 unavailable")
+    return str(WINDOWS_PS51)
 
 
 def _runner_text() -> str:
@@ -220,6 +232,25 @@ def test_exit_code_is_propagated():
     assert "exit $code" in inner_fn
 
 
+def test_wrapper_exits_instead_of_throwing_on_python_failure():
+    text = WRAPPER.read_text(encoding="utf-8")
+    assert WRAPPER.is_file()
+    assert "function Stop-G14FailClosed" in text
+    assert "function Complete-G14Python" in text
+    assert "Complete-G14Python 'backup'" in text
+    assert "Complete-G14Python 'manifest verification'" in text
+    assert "Complete-G14Python 'full drill'" in text
+    assert "-Code $code" in text
+    assert "exit $Code" in text
+    assert "throw" not in text
+    assert "Stop-G14FailClosed 'Python runtime not found'" in text
+    assert "Stop-G14FailClosed 'PHIGRAPH_POSTGRES_DSN is required'" in text
+    assert "Stop-G14FailClosed 'PHIGRAPH_G14_RESTORE_DSN is required for -FullDrill'" in text
+    assert "Stop-G14FailClosed 'Specify -BackupOnly, -VerifyManifest, or -FullDrill'" in text
+    assert "[Parameter(Mandatory = $true, ParameterSetName = 'VerifyManifest')]" in text
+    assert "[string]$ManifestPath" in text
+
+
 def test_noninteractive_fails_before_requesting_secrets():
     result = _run_runner()
     assert result.returncode == 2
@@ -382,3 +413,116 @@ def test_baseline_assert_rejects_dirty_worktree(tmp_path):
     assert result.returncode == 2
     assert "worktree is not clean" in _combined(result)
     assert "BASELINE_OK" not in result.stdout
+
+
+def _wrapper_env(tmp_path: Path, stub_exit: int | None = None) -> dict[str, str]:
+    merged = os.environ.copy()
+    for key in (
+        "PHIGRAPH_POSTGRES_DSN",
+        "PHIGRAPH_G14_RESTORE_DSN",
+        "PGPASSWORD",
+        "DATABASE_URL",
+        "DATABASE_PUBLIC_URL",
+    ):
+        merged.pop(key, None)
+    merged["PHIGRAPH_POSTGRES_DSN"] = "postgresql://g14:stub-pass@127.0.0.1:5432/g14_stub"
+    merged["G14_TEST_WRAPPER"] = str(WRAPPER)
+    if stub_exit is not None:
+        stub_dir = tmp_path / "py-stub"
+        stub_dir.mkdir(parents=True, exist_ok=True)
+        stub = f"@echo off\r\nexit /b {int(stub_exit)}\r\n"
+        for name in ("py.cmd", "python.cmd", "python3.cmd"):
+            (stub_dir / name).write_text(stub, encoding="ascii")
+        merged["PATH"] = str(stub_dir) + os.pathsep + merged.get("PATH", "")
+    return merged
+
+
+def _run_ps51_file(
+    script: Path,
+    extra: list[str] | None = None,
+    *,
+    env: dict[str, str],
+    cwd: Path | None = None,
+) -> subprocess.CompletedProcess[str]:
+    argv = [
+        _windows_powershell_51(),
+        "-NoProfile",
+        "-NonInteractive",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-File",
+        str(script),
+        *(extra or []),
+    ]
+    return subprocess.run(
+        argv,
+        capture_output=True,
+        text=True,
+        check=False,
+        env=env,
+        cwd=str(cwd or ROOT),
+        input="",
+    )
+
+
+def _run_wrapper(tmp_path: Path, extra: list[str], *, stub_exit: int | None = None) -> subprocess.CompletedProcess[str]:
+    return _run_ps51_file(WRAPPER, extra, env=_wrapper_env(tmp_path, stub_exit), cwd=tmp_path)
+
+
+def test_wrapper_local_precondition_uses_exit_2(tmp_path):
+    result = _run_wrapper(
+        tmp_path,
+        ["-FullDrill", "-ConfirmIsolatedRestore", "WRONG-TOKEN", "-ArtifactDir", str(tmp_path / "artifacts")],
+        stub_exit=0,
+    )
+    assert result.returncode == G14_EXIT_PRECONDITION
+    assert "G14-ISOLATED-RESTORE is required for -FullDrill" in _combined(result)
+    _assert_no_secrets(result)
+
+
+@pytest.mark.parametrize(
+    "stub_exit",
+    [G14_EXIT_OK, G14_EXIT_PRECONDITION, G14_EXIT_CONFLICT, G14_EXIT_VERIFY_FAIL],
+)
+def test_wrapper_preserves_python_exit_codes_on_powershell_51(tmp_path, stub_exit):
+    artifacts = tmp_path / "artifacts"
+    result = _run_wrapper(
+        tmp_path,
+        ["-BackupOnly", "-ArtifactDir", str(artifacts)],
+        stub_exit=stub_exit,
+    )
+    assert result.returncode == stub_exit
+    if stub_exit == G14_EXIT_OK:
+        assert "G14 backup complete" in _combined(result)
+    else:
+        assert f"G14 backup failed (exit {stub_exit})" in _combined(result)
+        assert result.returncode != 1
+    _assert_no_secrets(result)
+
+
+@pytest.mark.parametrize(
+    "stub_exit",
+    [G14_EXIT_OK, G14_EXIT_PRECONDITION, G14_EXIT_CONFLICT, G14_EXIT_VERIFY_FAIL],
+)
+def test_live_runner_parent_forwards_wrapper_exit_codes_on_powershell_51(tmp_path, stub_exit):
+    artifacts = tmp_path / "artifacts"
+    parent = tmp_path / "parent_forward.ps1"
+    parent.write_text(
+        "\n".join(
+            [
+                "Set-StrictMode -Version Latest",
+                "$ErrorActionPreference = 'Stop'",
+                "& $env:G14_TEST_WRAPPER -BackupOnly -ArtifactDir $env:G14_TEST_ARTIFACT",
+                "$code = $LASTEXITCODE",
+                "if ($null -eq $code) { $code = 0 }",
+                "exit $code",
+                "",
+            ]
+        ),
+        encoding="ascii",
+    )
+    env = _wrapper_env(tmp_path, stub_exit)
+    env["G14_TEST_ARTIFACT"] = str(artifacts)
+    result = _run_ps51_file(parent, env=env, cwd=tmp_path)
+    assert result.returncode == stub_exit
+    _assert_no_secrets(result)
