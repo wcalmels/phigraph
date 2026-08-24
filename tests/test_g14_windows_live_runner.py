@@ -18,6 +18,7 @@ RAILWAY_PROJECT_ID = "005d1dea-1c82-413c-9aa3-49e8eaeb9709"
 RAILWAY_ENVIRONMENT = "production"
 RAILWAY_SERVICE = "Postgres"
 RUNBOOK = ROOT / "docs" / "operations" / "G14_BACKUP_RESTORE_RUNBOOK.md"
+RAILWAY_STUB_SENTINEL = "G14_RAILWAY_STUB_INVOKED"
 G14_EXIT_OK = 0
 G14_EXIT_PRECONDITION = 2
 G14_EXIT_CONFLICT = 3
@@ -127,6 +128,40 @@ def _assert_no_secrets(result: subprocess.CompletedProcess[str]) -> None:
     assert "should-never-leak" not in combined
 
 
+def _runner_env_with_railway_sentinel(stub_dir: Path) -> dict[str, str]:
+    merged = os.environ.copy()
+    for key in (
+        "DATABASE_PUBLIC_URL",
+        "PHIGRAPH_POSTGRES_DSN",
+        "PHIGRAPH_G14_RESTORE_DSN",
+        "PGPASSWORD",
+        "DATABASE_URL",
+    ):
+        merged.pop(key, None)
+    stub_dir.mkdir(parents=True, exist_ok=True)
+    if os.name == "nt":
+        stub = (
+            f"@echo off\r\n"
+            f"echo {RAILWAY_STUB_SENTINEL}=1 1>&2\r\n"
+            "exit /b 99\r\n"
+        )
+        (stub_dir / "railway.cmd").write_text(stub, encoding="ascii")
+        (stub_dir / "railway.bat").write_text(stub, encoding="ascii")
+    else:
+        stub_path = stub_dir / "railway"
+        stub_path.write_text(
+            f"#!/bin/sh\necho {RAILWAY_STUB_SENTINEL}=1 >&2\nexit 99\n",
+            encoding="ascii",
+        )
+        stub_path.chmod(0o755)
+    merged["PATH"] = str(stub_dir) + os.pathsep + merged.get("PATH", "")
+    return merged
+
+
+def _assert_railway_stub_not_invoked(result: subprocess.CompletedProcess[str]) -> None:
+    assert RAILWAY_STUB_SENTINEL not in _combined(result)
+
+
 def test_runner_file_exists():
     assert RUNNER.is_file()
 
@@ -210,7 +245,7 @@ def test_runner_and_runbook_do_not_use_directory_association_workarounds():
     assert "OneDrive" not in runner
 
 
-def test_railway_target_is_not_overridable_via_runner_parameters():
+def test_railway_target_is_not_overridable_via_runner_parameters(tmp_path):
     text = _runner_text()
     param_block = text[text.index("param(") : text.index("Set-StrictMode")]
     for forbidden in (
@@ -224,16 +259,16 @@ def test_railway_target_is_not_overridable_via_runner_parameters():
         assert re.search(forbidden, param_block) is None, forbidden
     assert "$InsideRailwayEnvironment" in param_block
     assert "$ExpectedBaselineCommit" in param_block
+    env = _runner_env_with_railway_sentinel(tmp_path / "railway-stub")
     for extra in (
         ("-Project", "00000000-0000-0000-0000-000000000000"),
         ("-Environment", "staging"),
         ("-Service", "phigraph-api"),
         ("-RailwayProjectId", "00000000-0000-0000-0000-000000000000"),
     ):
-        result = _run_runner(*extra)
-        combined = _combined(result)
+        result = _run_runner(*extra, env=env)
         assert result.returncode != 0
-        assert "NamedParameterNotFound" in combined
+        _assert_railway_stub_not_invoked(result)
         _assert_no_secrets(result)
 
 
