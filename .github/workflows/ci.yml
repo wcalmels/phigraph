@@ -86,7 +86,9 @@ jobs:
             tests/contract/test_grdi_transactional_postgres.py \
             tests/contract/test_grdi_cutover_rc7.py \
             tests/contract/test_schema_governance_postgres.py \
-            tests/test_grdi_rc8_cutover.py -v
+            tests/contract/test_g14_backup_restore_postgres.py \
+            tests/test_grdi_rc8_cutover.py \
+            tests/test_g14_backup_restore.py -v
 
   package:
     runs-on: ubuntu-latest
