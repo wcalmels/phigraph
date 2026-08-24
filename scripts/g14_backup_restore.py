@@ -79,7 +79,19 @@ def utc_now_iso() -> str:
 
 
 def tool_git_commit() -> str:
-    return _CUTOVER.tool_git_commit()
+    repo_root = Path(__file__).resolve().parents[1]
+    try:
+        completed = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            cwd=repo_root,
+            capture_output=True,
+            text=True,
+            check=True,
+            env=sanitized_subprocess_base_env(),
+        )
+        return completed.stdout.strip()
+    except (OSError, subprocess.CalledProcessError):
+        return "unknown"
 
 
 def sha256_file(path: Path) -> str:
@@ -112,7 +124,27 @@ def inventory_fingerprint(inventory: dict[str, Any]) -> str:
 
 
 def run_pg_restore_list(backup_path: Path) -> dict[str, Any]:
-    return _CUTOVER.run_pg_restore_list(backup_path)
+    pg_restore = shutil.which("pg_restore")
+    if pg_restore is None:
+        print("pg_restore is required to validate PostgreSQL custom-format backups", file=sys.stderr)
+        raise SystemExit(EXIT_PRECONDITION)
+    completed = subprocess.run(
+        [pg_restore, "--list", str(backup_path)],
+        capture_output=True,
+        text=True,
+        check=False,
+        env=sanitized_subprocess_base_env(),
+    )
+    if completed.returncode != 0:
+        print("pg_restore --list failed for backup archive", file=sys.stderr)
+        raise SystemExit(EXIT_PRECONDITION)
+    entries = [line for line in completed.stdout.splitlines() if line.strip()]
+    return {
+        "format": "pg_custom",
+        "pg_restore_exit_code": completed.returncode,
+        "archive_list_entries": len(entries),
+        "status": "VERIFIED",
+    }
 
 
 def normalize_dsn(dsn: str) -> str:
@@ -182,12 +214,19 @@ def libpq_env_from_dsn(dsn: str) -> dict[str, str]:
     return env
 
 
-def subprocess_env_for_dsn(dsn: str) -> dict[str, str]:
+def sanitized_subprocess_base_env() -> dict[str, str]:
     env = {
         key: value
         for key, value in os.environ.items()
         if key in _PRESERVED_SUBPROCESS_ENV_KEYS
     }
+    for key in _SENSITIVE_ENV_KEYS:
+        env.pop(key, None)
+    return env
+
+
+def subprocess_env_for_dsn(dsn: str) -> dict[str, str]:
+    env = sanitized_subprocess_base_env()
     env.update(libpq_env_from_dsn(dsn))
     for key in _SENSITIVE_ENV_KEYS:
         env.pop(key, None)
@@ -223,7 +262,13 @@ def tool_versions() -> dict[str, str | None]:
     for tool in ("pg_dump", "pg_restore"):
         path = shutil.which(tool)
         if path:
-            completed = subprocess.run([path, "--version"], capture_output=True, text=True, check=False)
+            completed = subprocess.run(
+                [path, "--version"],
+                capture_output=True,
+                text=True,
+                check=False,
+                env=sanitized_subprocess_base_env(),
+            )
             versions[tool] = (completed.stdout or completed.stderr).strip().splitlines()[0]
     try:
         import psycopg

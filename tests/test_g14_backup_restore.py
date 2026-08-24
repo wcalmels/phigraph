@@ -7,6 +7,7 @@ import json
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
@@ -268,10 +269,8 @@ def test_backup_only_exit_zero(g14, source_dsn, tmp_path, monkeypatch):
     fake_conn = MagicMock()
     fake_conn.__enter__.return_value = fake_conn
     fake_conn.__exit__.return_value = False
-
-    import psycopg
-
-    monkeypatch.setattr(psycopg, "connect", lambda *_a, **_k: fake_conn)
+    fake_psycopg = SimpleNamespace(connect=lambda *_args, **_kwargs: fake_conn)
+    monkeypatch.setitem(sys.modules, "psycopg", fake_psycopg)
 
     report = g14.run_backup(source_dsn=source_dsn, artifact_dir=tmp_path, run_id="abcd1234")
     exit_code = g14.resolve_exit_code(report)
@@ -350,3 +349,32 @@ def test_redact_exception_covers_both_dsns(g14, source_dsn, restore_dsn):
     )
     assert "secret" not in message
     assert "postgresql://***" in message
+
+
+def test_all_subprocess_envs_exclude_sensitive_variables(g14, source_dsn, restore_dsn, tmp_path, monkeypatch):
+    monkeypatch.setenv("PHIGRAPH_POSTGRES_DSN", source_dsn)
+    monkeypatch.setenv("PHIGRAPH_G14_RESTORE_DSN", restore_dsn)
+    monkeypatch.setenv("DATABASE_URL", source_dsn)
+    seen_envs: list[dict[str, str]] = []
+
+    def fake_run(*_args, **kwargs):
+        env = kwargs.get("env")
+        if env is not None:
+            seen_envs.append(dict(env))
+        return MagicMock(returncode=0, stdout="HEAD\npg_dump (PostgreSQL) 16\n", stderr="")
+
+    monkeypatch.setattr(g14.subprocess, "run", fake_run)
+    monkeypatch.setattr(g14.shutil, "which", lambda name: f"/usr/bin/{name}")
+
+    g14.tool_git_commit()
+    g14.tool_versions()
+    backup = tmp_path / "g14_abcd1234.dump"
+    _write_backup(backup)
+    g14.run_pg_restore_list(backup)
+    g14.run_pg_dump_custom(source_dsn, backup)
+    g14.run_pg_restore(restore_dsn, "phigraph_g14_abcd1234", backup)
+
+    assert seen_envs
+    for env in seen_envs:
+        for key in ("PHIGRAPH_POSTGRES_DSN", "PHIGRAPH_G14_RESTORE_DSN", "DATABASE_URL"):
+            assert key not in env
