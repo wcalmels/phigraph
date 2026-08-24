@@ -2,7 +2,8 @@
 
 Status: **local/CI implementation authorized**
 Railway live drill: **blocked** until an authorized operator runs the Windows-safe live runner
-Stable deployment baseline: `e805f96` / Railway `f1dd97c9`
+Railway deployed baseline: `e805f96` / Railway `f1dd97c9` (commit currently running in `phigraph-api`)
+Windows runner commit: any **clean descendant** of that baseline (the runner SHA changes with each fix; do not pin `HEAD` to the runner commit)
 
 ## Purpose
 
@@ -138,7 +139,8 @@ For Railway production keys, prefer `railway run` env injection or `Read-Host -A
 
 Use a **normal interactive PowerShell window**, not an agent, Cursor task, or nested `-Command` string. Nested `powershell -Command`, `python -c`, and `cmd /c` quoting is forbidden: it dropped DSN quotes on Windows and failed before `pg_dump`.
 
-Pinned worktree for the current pilot: `e805f969421fc0392632365df998d0a248fc9d97`.
+Railway baseline (`ExpectedBaselineCommit`): `e805f969421fc0392632365df998d0a248fc9d97`.
+The live runner must run from a **clean** worktree whose `HEAD` **descends from** that baseline (`git merge-base --is-ancestor`). The runner's own commit is not the Railway deployment pin.
 
 ```powershell
 cd C:\Users\wcalm\phigraph-g14-e805f96
@@ -155,7 +157,7 @@ Operator flow:
 5. **Always remove the TCP Proxy after the drill, including on failure**: Postgres → Settings → Networking → delete `:5432` → Deploy Changes. Confirm `DATABASE_PUBLIC_URL` is gone.
 6. Do not start a second drill until the proxy is absent and health/live plus ready remain HTTP 200.
 
-The runner fail-closes without an interactive console, without `DATABASE_PUBLIC_URL` in the child, if restore host is not `localhost` / `127.0.0.1` / `::1`, if the password is empty, if source equals restore, if `pg_dump`/`pg_restore` are missing, or if HEAD is not the pinned pilot commit.
+The runner fail-closes without an interactive console, without `DATABASE_PUBLIC_URL` in the child, if restore host is not `localhost` / `127.0.0.1` / `::1`, if the password is empty, if source equals restore, if `pg_dump`/`pg_restore` are missing, if the worktree is dirty, or if `HEAD` does not descend from the Railway baseline.
 
 Do not pass DSNs on argv. Do not copy secrets to clipboard, transcript, or files. Until this runner is used by an authorized operator: **local/CI only**.
 

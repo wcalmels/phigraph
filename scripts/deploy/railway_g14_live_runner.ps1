@@ -13,13 +13,14 @@
 .PARAMETER InsideRailwayEnvironment
   Internal mode for the railway-run child. Requires DATABASE_PUBLIC_URL.
 
-.PARAMETER ExpectedGitCommit
-  Pinned G14 pilot commit. Local mode fail-closes on mismatch.
+.PARAMETER ExpectedBaselineCommit
+  Railway-deployed G14 baseline. Local mode requires this commit to be an
+  ancestor of HEAD and a clean worktree. Do not pin HEAD to the runner commit.
 #>
 [CmdletBinding()]
 param(
     [switch]$InsideRailwayEnvironment,
-    [string]$ExpectedGitCommit = 'e805f969421fc0392632365df998d0a248fc9d97'
+    [string]$ExpectedBaselineCommit = 'e805f969421fc0392632365df998d0a248fc9d97'
 )
 
 Set-StrictMode -Version Latest
@@ -153,17 +154,36 @@ function Assert-G14SourceDiffersFromRestore {
     }
 }
 
-function Assert-G14ExpectedCommit {
+function Assert-G14BaselineAndWorktree {
+    param(
+        [string]$RepoRoot = $script:RepoRoot,
+        [string]$BaselineCommit = $ExpectedBaselineCommit
+    )
     $git = Get-Command git -ErrorAction SilentlyContinue
     if (-not $git) {
         Stop-G14FailClosed 'git is required'
     }
-    $head = & git -C $script:RepoRoot rev-parse HEAD
+    if ([string]::IsNullOrWhiteSpace($RepoRoot) -or -not (Test-Path -LiteralPath $RepoRoot)) {
+        Stop-G14FailClosed 'git repository is required'
+    }
+    if ([string]::IsNullOrWhiteSpace($BaselineCommit)) {
+        Stop-G14FailClosed 'baseline commit is required'
+    }
+    $head = & git -C $RepoRoot rev-parse HEAD
     if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($head)) {
         Stop-G14FailClosed 'unable to resolve worktree HEAD'
     }
-    if ($head.Trim() -ne $ExpectedGitCommit) {
-        Stop-G14FailClosed 'worktree HEAD does not match the pinned G14 pilot commit'
+    & git -C $RepoRoot merge-base --is-ancestor $BaselineCommit HEAD
+    if ($LASTEXITCODE -ne 0) {
+        Stop-G14FailClosed 'HEAD does not descend from the G14 Railway baseline commit'
+    }
+    $status = & git -C $RepoRoot status --porcelain
+    if ($LASTEXITCODE -ne 0) {
+        Stop-G14FailClosed 'unable to determine worktree status'
+    }
+    $statusText = if ($null -eq $status) { '' } else { [string]$status }
+    if (-not [string]::IsNullOrWhiteSpace($statusText)) {
+        Stop-G14FailClosed 'worktree is not clean'
     }
 }
 
@@ -215,7 +235,7 @@ function Invoke-G14OperatorLocal {
     if (-not (Test-G14InteractiveConsole)) {
         Stop-G14FailClosed 'interactive PowerShell console is required'
     }
-    Assert-G14ExpectedCommit
+    Assert-G14BaselineAndWorktree
     Assert-G14PgTools
     if (-not (Get-Command railway -ErrorAction SilentlyContinue)) {
         Stop-G14FailClosed 'railway CLI is required'

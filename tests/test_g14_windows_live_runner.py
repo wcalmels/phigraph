@@ -280,6 +280,112 @@ def test_no_secret_persistence_apis():
     assert "Write-Host $" not in text
     assert "Set-Content" not in text
     assert PINNED_COMMIT in text
+    assert "ExpectedBaselineCommit" in text
+    assert "ExpectedGitCommit" not in text
     names = _FUNCTION_RE.findall(text)
     assert "Invoke-G14OperatorLocal" in names
     assert "Invoke-G14InsideRailwayEnvironment" in names
+    assert "Assert-G14BaselineAndWorktree" in names
+
+
+def _git(cwd: Path, *args: str, check: bool = True) -> subprocess.CompletedProcess[str]:
+    env = os.environ.copy()
+    env["GIT_AUTHOR_NAME"] = "G14 Test"
+    env["GIT_AUTHOR_EMAIL"] = "g14-test@example.invalid"
+    env["GIT_COMMITTER_NAME"] = "G14 Test"
+    env["GIT_COMMITTER_EMAIL"] = "g14-test@example.invalid"
+    return subprocess.run(
+        ["git", *args],
+        cwd=cwd,
+        capture_output=True,
+        text=True,
+        check=check,
+        env=env,
+    )
+
+
+def _init_git_repo(path: Path) -> None:
+    path.mkdir(parents=True, exist_ok=True)
+    _git(path, "init")
+    _git(path, "config", "user.name", "G14 Test")
+    _git(path, "config", "user.email", "g14-test@example.invalid")
+    _git(path, "config", "commit.gpgsign", "false")
+
+
+def _empty_commit(path: Path, message: str) -> str:
+    _git(path, "commit", "--allow-empty", "-m", message)
+    return _git(path, "rev-parse", "HEAD").stdout.strip()
+
+
+def _run_baseline_assert(repo: Path, baseline: str) -> subprocess.CompletedProcess[str]:
+    text = _runner_text()
+    helpers = "\n".join(
+        [
+            _extract_function(text, "Stop-G14FailClosed"),
+            _extract_function(text, "Assert-G14BaselineAndWorktree"),
+        ]
+    )
+    repo_ps = str(repo).replace("'", "''")
+    probe = (
+        f"Assert-G14BaselineAndWorktree -RepoRoot '{repo_ps}' -BaselineCommit '{baseline}'; "
+        "'BASELINE_OK'"
+    )
+    return subprocess.run(
+        [_powershell(), "-NoProfile", "-NonInteractive", "-Command", helpers + "\n" + probe],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+
+def test_operator_mode_uses_ancestor_baseline_not_exact_head():
+    text = _runner_text()
+    local_fn = _extract_function(text, "Invoke-G14OperatorLocal")
+    assert "Assert-G14BaselineAndWorktree" in local_fn
+    assert "merge-base --is-ancestor" in text
+    assert "status --porcelain" in text
+    assert "-ne $ExpectedGitCommit" not in text
+    assert "does not match the pinned G14 pilot commit" not in text
+
+
+def test_current_worktree_head_descends_from_railway_baseline():
+    head = _git(ROOT, "rev-parse", "HEAD").stdout.strip()
+    assert head != PINNED_COMMIT
+    result = _git(ROOT, "merge-base", "--is-ancestor", PINNED_COMMIT, "HEAD", check=False)
+    assert result.returncode == 0
+
+
+def test_baseline_assert_accepts_clean_descendant(tmp_path):
+    repo = tmp_path / "descendant"
+    _init_git_repo(repo)
+    baseline = _empty_commit(repo, "baseline")
+    child = _empty_commit(repo, "runner-fix")
+    assert child != baseline
+    result = _run_baseline_assert(repo, baseline)
+    assert result.returncode == 0, result.stderr or result.stdout
+    assert "BASELINE_OK" in result.stdout
+
+
+def test_baseline_assert_rejects_unrelated_history(tmp_path):
+    baseline_repo = tmp_path / "baseline"
+    other_repo = tmp_path / "other"
+    _init_git_repo(baseline_repo)
+    baseline = _empty_commit(baseline_repo, "railway-baseline")
+    _init_git_repo(other_repo)
+    _empty_commit(other_repo, "unrelated")
+    result = _run_baseline_assert(other_repo, baseline)
+    assert result.returncode == 2
+    assert "HEAD does not descend from the G14 Railway baseline commit" in _combined(result)
+    assert "BASELINE_OK" not in result.stdout
+
+
+def test_baseline_assert_rejects_dirty_worktree(tmp_path):
+    repo = tmp_path / "dirty"
+    _init_git_repo(repo)
+    baseline = _empty_commit(repo, "baseline")
+    _empty_commit(repo, "runner-fix")
+    (repo / "scratch.txt").write_text("dirty", encoding="utf-8")
+    result = _run_baseline_assert(repo, baseline)
+    assert result.returncode == 2
+    assert "worktree is not clean" in _combined(result)
+    assert "BASELINE_OK" not in result.stdout
