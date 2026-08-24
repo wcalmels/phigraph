@@ -36,6 +36,7 @@ def _seed_shadow_gateway_artifact(postgres_dsn: str) -> None:
     ledger.append_scoped_once(
         "gateway_decisions",
         {
+            "gateway_decision_id": "gd_g14_seed",
             "execution_state": "NOT_EXECUTED",
             "outcome_origin": "SHADOW_SIMULATION",
             "connector_invoked": False,
