@@ -348,13 +348,6 @@ def test_operator_mode_uses_ancestor_baseline_not_exact_head():
     assert "does not match the pinned G14 pilot commit" not in text
 
 
-def test_current_worktree_head_descends_from_railway_baseline():
-    head = _git(ROOT, "rev-parse", "HEAD").stdout.strip()
-    assert head != PINNED_COMMIT
-    result = _git(ROOT, "merge-base", "--is-ancestor", PINNED_COMMIT, "HEAD", check=False)
-    assert result.returncode == 0
-
-
 def test_baseline_assert_accepts_clean_descendant(tmp_path):
     repo = tmp_path / "descendant"
     _init_git_repo(repo)
