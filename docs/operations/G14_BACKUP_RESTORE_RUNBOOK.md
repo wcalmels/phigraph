@@ -42,6 +42,9 @@ Required binaries: `pg_dump`, `pg_restore`, Python package `psycopg`.
 - Only exact ephemeral database names may be dropped during cleanup.
 - Corrupted dump/manifest/checksum → non-zero exit (fail-closed).
 - Never print secrets, DSNs, dump bytes, or clipboard transcripts.
+- `pg_dump` / `pg_restore` use libpq env vars only (`PGHOST`, `PGPORT`, `PGUSER`, `PGPASSWORD`, `PGDATABASE`, `PGSSLMODE`); DSNs never appear in process argv.
+- Manifest stores `backup_filename` (for example `g14_<run_id>.dump`) relative to the manifest directory; filename, manifest name, and `run_id` must match.
+- Existing dump/manifest for the same `run_id` is rejected (collision guard).
 
 ## Workflow
 
@@ -89,7 +92,6 @@ Expected: non-zero exit, gate `G14f=PASS` in report when using `--expect-corrupt
 $env:PHIGRAPH_G14_RESTORE_DSN = '<admin-dsn-to-postgres-db>'
 py -3 scripts/g14_backup_restore.py full-drill `
   --artifact-dir .\output\g14 `
-  --restore-dsn $env:PHIGRAPH_G14_RESTORE_DSN `
   --confirm-isolated-restore G14-ISOLATED-RESTORE `
   --output .\output\g14\report-full-drill.json --force-output
 ```

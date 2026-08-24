@@ -73,11 +73,11 @@ def test_full_drill_passes_on_fresh_database(g14, isolated_source, restore_admin
         pytest.fail("pg_dump/pg_restore required for G14 postgres contract")
 
     monkeypatch.setenv("PHIGRAPH_POSTGRES_DSN", isolated_source)
+    monkeypatch.setenv("PHIGRAPH_G14_RESTORE_DSN", restore_admin_dsn)
     artifact_dir = tmp_path / "artifacts"
     report = g14.run_full_drill(
         source_dsn=isolated_source,
         artifact_dir=artifact_dir,
-        restore_dsn=restore_admin_dsn,
         confirm=g14.CONFIRM_ISOLATED_RESTORE,
         run_id="abcd1234",
     )
@@ -112,7 +112,7 @@ def test_corrupt_manifest_rejected(g14, isolated_source, restore_admin_dsn, tmp_
     monkeypatch.setenv("PHIGRAPH_POSTGRES_DSN", isolated_source)
     artifact_dir = tmp_path / "artifacts"
     backup_report = g14.run_backup(source_dsn=isolated_source, artifact_dir=artifact_dir, run_id="abcd1235")
-    manifest_path = Path(str(backup_report["manifest_path"]))
+    manifest_path = artifact_dir / str(backup_report["manifest_path"])
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     manifest["backup_sha256"] = "0" * 64
     manifest_path.write_text(json.dumps(manifest), encoding="utf-8")

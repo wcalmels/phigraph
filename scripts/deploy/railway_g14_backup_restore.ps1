@@ -51,9 +51,6 @@ param(
     [string]$ManifestPath,
 
     [Parameter(ParameterSetName = 'FullDrill')]
-    [string]$RestoreDsn,
-
-    [Parameter(ParameterSetName = 'FullDrill')]
     [string]$ConfirmIsolatedRestore,
 
     [Parameter(ParameterSetName = 'VerifyManifest')]
@@ -163,12 +160,11 @@ if ($FullDrill) {
     if ($ConfirmIsolatedRestore -ne $ConfirmToken) {
         throw "-ConfirmIsolatedRestore $ConfirmToken is required for -FullDrill"
     }
-    if (-not $RestoreDsn -and -not $env:PHIGRAPH_G14_RESTORE_DSN) {
+    if (-not $env:PHIGRAPH_G14_RESTORE_DSN) {
         $env:PHIGRAPH_G14_RESTORE_DSN = Read-SecretEnv -Name 'PHIGRAPH_G14_RESTORE_DSN' -Prompt 'PHIGRAPH_G14_RESTORE_DSN (admin connection target, not production)'
     }
-    $restore = if ($RestoreDsn) { $RestoreDsn } else { $env:PHIGRAPH_G14_RESTORE_DSN }
-    if (-not $restore) {
-        throw 'Restore DSN is required via -RestoreDsn or PHIGRAPH_G14_RESTORE_DSN'
+    if (-not $env:PHIGRAPH_G14_RESTORE_DSN) {
+        throw 'PHIGRAPH_G14_RESTORE_DSN is required for -FullDrill'
     }
     $artifact = (Resolve-Path -LiteralPath $ArtifactDir -ErrorAction SilentlyContinue)
     if (-not $artifact) {
@@ -179,7 +175,6 @@ if ($FullDrill) {
         $PythonScript,
         'full-drill',
         '--artifact-dir', $artifact.Path,
-        '--restore-dsn', $restore,
         '--confirm-isolated-restore', $ConfirmToken
     ) + $reportArgs
     if ($RunId) { $args += @('--run-id', $RunId) }
