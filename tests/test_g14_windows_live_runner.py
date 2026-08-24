@@ -14,6 +14,10 @@ ROOT = Path(__file__).resolve().parents[1]
 RUNNER = ROOT / "scripts" / "deploy" / "railway_g14_live_runner.ps1"
 WRAPPER = ROOT / "scripts" / "deploy" / "railway_g14_backup_restore.ps1"
 PINNED_COMMIT = "e805f969421fc0392632365df998d0a248fc9d97"
+RAILWAY_PROJECT_ID = "005d1dea-1c82-413c-9aa3-49e8eaeb9709"
+RAILWAY_ENVIRONMENT = "production"
+RAILWAY_SERVICE = "Postgres"
+RUNBOOK = ROOT / "docs" / "operations" / "G14_BACKUP_RESTORE_RUNBOOK.md"
 G14_EXIT_OK = 0
 G14_EXIT_PRECONDITION = 2
 G14_EXIT_CONFLICT = 3
@@ -145,9 +149,14 @@ def test_powershell_parser_accepts_runner():
     assert "PARSE_OK" in result.stdout
 
 
+def _railway_child_block() -> str:
+    text = _runner_text()
+    return text[text.index("$childArgs = @(") : text.index("& railway @childArgs")]
+
+
 def test_child_uses_file_not_command():
     text = _runner_text()
-    railway_block = text[text.index("$childArgs = @(") : text.index("& railway @childArgs")]
+    railway_block = _railway_child_block()
     assert "-File" in railway_block
     assert "$PSCommandPath" in railway_block
     assert "-InsideRailwayEnvironment" in railway_block
@@ -158,7 +167,7 @@ def test_child_uses_file_not_command():
 
 def test_child_argv_has_no_dsn():
     text = _runner_text()
-    railway_block = text[text.index("$childArgs = @(") : text.index("& railway @childArgs")]
+    railway_block = _railway_child_block()
     assert "PHIGRAPH_" not in railway_block
     assert "DATABASE_PUBLIC_URL" not in railway_block
     assert "$encoded" not in railway_block
@@ -166,6 +175,66 @@ def test_child_argv_has_no_dsn():
     assert "postgresql://" not in railway_block
     assert "@childArgs" in text
     assert "& railway @childArgs" in text
+
+
+def test_child_selects_explicit_railway_target_before_double_dash():
+    text = _runner_text()
+    railway_block = _railway_child_block()
+    project_idx = railway_block.index("'--project'")
+    environment_idx = railway_block.index("'--environment'")
+    service_idx = railway_block.index("'--service'")
+    separator_idx = railway_block.index("'--'")
+    assert project_idx < environment_idx < service_idx < separator_idx
+    assert f"$script:RailwayProjectId = '{RAILWAY_PROJECT_ID}'" in text
+    assert RAILWAY_PROJECT_ID
+    assert f"$script:RailwayEnvironment = '{RAILWAY_ENVIRONMENT}'" in text
+    assert f"$script:RailwayService = '{RAILWAY_SERVICE}'" in text
+    assert "'--project', $script:RailwayProjectId" in railway_block
+    assert "'--environment', $script:RailwayEnvironment" in railway_block
+    assert "'--service', $script:RailwayService" in railway_block
+
+
+def test_runner_and_runbook_do_not_use_directory_association_workarounds():
+    runner = _runner_text()
+    runbook = RUNBOOK.read_text(encoding="utf-8")
+    gitignore = (ROOT / ".gitignore").read_text(encoding="utf-8")
+    exclude = ROOT / ".git" / "info" / "exclude"
+    exclude_text = exclude.read_text(encoding="utf-8") if exclude.is_file() else ""
+    for haystack in (runner, runbook):
+        assert "railway link" not in haystack
+        assert "railway.exe link" not in haystack
+    assert "railway link" not in gitignore
+    assert ".railway" not in gitignore
+    assert "railway link" not in exclude_text
+    assert ".railway" not in exclude_text
+    assert "OneDrive" not in runner
+
+
+def test_railway_target_is_not_overridable_via_runner_parameters():
+    text = _runner_text()
+    param_block = text[text.index("param(") : text.index("Set-StrictMode")]
+    for forbidden in (
+        r"\$Project\b",
+        r"\$Environment\b",
+        r"\$Service\b",
+        r"\$RailwayProjectId\b",
+        r"\$RailwayEnvironment\b",
+        r"\$RailwayService\b",
+    ):
+        assert re.search(forbidden, param_block) is None, forbidden
+    assert "$InsideRailwayEnvironment" in param_block
+    assert "$ExpectedBaselineCommit" in param_block
+    for extra in (
+        ("-Project", "00000000-0000-0000-0000-000000000000"),
+        ("-Environment", "staging"),
+        ("-Service", "phigraph-api"),
+        ("-RailwayProjectId", "00000000-0000-0000-0000-000000000000"),
+    ):
+        result = _run_runner(*extra)
+        combined = _combined(result)
+        assert result.returncode != 0
+        assert "NamedParameterNotFound" in combined
+        _assert_no_secrets(result)
 
 
 def test_inner_source_comes_from_database_public_url_only():

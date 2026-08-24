@@ -5,10 +5,11 @@
 
 .DESCRIPTION
   Operator mode prompts for the local PostgreSQL password, then re-invokes this
-  same file through `railway run -- powershell -File`. Secrets stay in process
-  environment variables and are never placed on argv.
+  same file through `railway run --project/--environment/--service -- powershell -File`.
+  Secrets stay in process environment variables and are never placed on argv.
 
-  This script does not enable a Railway TCP proxy and does not print DSNs.
+  This script does not require a linked Railway directory or a `.railway` folder.
+  It does not enable a Railway TCP proxy and does not print DSNs.
 
 .PARAMETER InsideRailwayEnvironment
   Internal mode for the railway-run child. Requires DATABASE_PUBLIC_URL.
@@ -30,6 +31,9 @@ $script:RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
 $script:WrapperPath = Join-Path $PSScriptRoot 'railway_g14_backup_restore.ps1'
 $script:ArtifactDir = Join-Path $script:RepoRoot 'output\g14'
 $script:AllowedRestoreHosts = @('localhost', '127.0.0.1', '::1')
+$script:RailwayProjectId = '005d1dea-1c82-413c-9aa3-49e8eaeb9709'
+$script:RailwayEnvironment = 'production'
+$script:RailwayService = 'Postgres'
 $script:PgBinCandidates = @(
     'C:\Program Files\PostgreSQL\18\bin',
     'C:\Program Files\PostgreSQL\17\bin',
@@ -258,9 +262,16 @@ function Invoke-G14OperatorLocal {
         $plain = $null
         $encoded = $null
 
+        if ([string]::IsNullOrWhiteSpace($script:RailwayProjectId) -or
+            [string]::IsNullOrWhiteSpace($script:RailwayEnvironment) -or
+            [string]::IsNullOrWhiteSpace($script:RailwayService)) {
+            Stop-G14FailClosed 'Railway target constants are required'
+        }
         $childArgs = @(
             'run',
-            '--service', 'Postgres',
+            '--project', $script:RailwayProjectId,
+            '--environment', $script:RailwayEnvironment,
+            '--service', $script:RailwayService,
             '--',
             'powershell',
             '-NoProfile',

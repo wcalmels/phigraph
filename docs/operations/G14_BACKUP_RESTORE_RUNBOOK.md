@@ -1,7 +1,7 @@
 # G14 — Isolated PostgreSQL Backup/Restore Runbook
 
 Status: **local/CI implementation authorized**
-Railway live drill: **blocked** until an authorized operator runs the Windows-safe live runner
+Railway live drill: **paused / not executed** — waiting for an authorized interactive operator after the explicit-target runner is reviewed. Do not treat this document as G14 PASS.
 Railway deployed baseline: `e805f96` / Railway `f1dd97c9` (commit currently running in `phigraph-api`)
 Windows runner commit: any **clean descendant** of that baseline (the runner SHA changes with each fix; do not pin `HEAD` to the runner commit)
 
@@ -142,6 +142,8 @@ Use a **normal interactive PowerShell window**, not an agent, Cursor task, or ne
 Railway baseline (`ExpectedBaselineCommit`): `e805f969421fc0392632365df998d0a248fc9d97`.
 The live runner must run from a **clean** worktree whose `HEAD` **descends from** that baseline (`git merge-base --is-ancestor`). The runner's own commit is not the Railway deployment pin.
 
+The runner selects Railway with internal fail-closed constants and CLI flags (`--project`, `--environment production`, `--service Postgres`) placed before `--`. A linked local Railway directory or `.railway` folder is neither required nor used. Do not associate this worktree with Railway, and do not pass project, environment, or service parameters to the runner.
+
 ```powershell
 cd C:\Users\wcalm\phigraph-g14-e805f96
 .\scripts\deploy\railway_g14_live_runner.ps1
@@ -152,7 +154,7 @@ Operator flow:
 1. Confirm Railway freeze (no `phigraph-api` source, no unplanned deploy).
 2. Enable the Postgres TCP Proxy **manually** in Railway only for the duration of the drill.
 3. Run `railway_g14_live_runner.ps1` in interactive PowerShell. It prompts for the **local** PostgreSQL password via `Read-Host -AsSecureString`, then re-invokes itself with:
-   `railway run --service Postgres -- powershell -NoProfile -ExecutionPolicy Bypass -File <this-script> -InsideRailwayEnvironment`
+   `railway run --project <phigraph-private-pilot-id> --environment production --service Postgres -- powershell -NoProfile -ExecutionPolicy Bypass -File <this-script> -InsideRailwayEnvironment`
 4. Restore target is local only: `127.0.0.1:5432` ephemeral `phigraph_g14_<8hex>`.
 5. **Always remove the TCP Proxy after the drill, including on failure**: Postgres → Settings → Networking → delete `:5432` → Deploy Changes. Confirm `DATABASE_PUBLIC_URL` is gone.
 6. Do not start a second drill until the proxy is absent and health/live plus ready remain HTTP 200.
