@@ -29,6 +29,7 @@ results/
 *.sqlite3
 *.log
 backups/
+output/g14/
 
 # IDE and OS
 .vscode/
