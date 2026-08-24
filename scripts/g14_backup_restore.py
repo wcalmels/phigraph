@@ -801,10 +801,11 @@ def run_full_drill(
 
 
 def resolve_exit_code(report: dict[str, Any]) -> int:
+    gates = build_gate_results(report)
+    report["gates"] = gates
     if report.get("issues") and report.get("corruption_test") != "REJECTED":
         return EXIT_VERIFY_FAIL
     mode = report.get("mode")
-    gates = report.get("gates") or {}
     if mode == "verify-manifest" and report.get("corruption_test") == "REJECTED":
         return EXIT_OK if gates.get("G14f") == "PASS" else EXIT_VERIFY_FAIL
     required = {
