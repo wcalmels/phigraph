@@ -46,8 +46,7 @@ param(
     [Parameter(ParameterSetName = 'FullDrill')]
     [string]$ArtifactDir = (Join-Path $PSScriptRoot '..\..\output\g14'),
 
-    [Parameter(ParameterSetName = 'VerifyManifest')]
-    [Parameter(Mandatory = $true)]
+    [Parameter(Mandatory = $true, ParameterSetName = 'VerifyManifest')]
     [string]$ManifestPath,
 
     [Parameter(ParameterSetName = 'FullDrill')]
@@ -67,6 +66,23 @@ $ErrorActionPreference = 'Stop'
 $RepoRoot = Resolve-Path (Join-Path $PSScriptRoot '..\..')
 $PythonScript = Join-Path $RepoRoot 'scripts\g14_backup_restore.py'
 $ConfirmToken = 'G14-ISOLATED-RESTORE'
+
+function Stop-G14FailClosed {
+    param(
+        [Parameter(Mandatory = $true)][string]$Reason,
+        [int]$Code = 2
+    )
+    $host.UI.WriteErrorLine($Reason)
+    exit $Code
+}
+
+function Complete-G14Python {
+    param([Parameter(Mandatory = $true)][string]$Action)
+    $code = $LASTEXITCODE
+    if ($code -ne 0) {
+        Stop-G14FailClosed -Reason ("G14 $Action failed (exit $code)") -Code $code
+    }
+}
 
 function Read-SecretEnv {
     param(
@@ -94,7 +110,7 @@ function Resolve-Python {
             return $candidate
         }
     }
-    throw 'Python runtime not found'
+    Stop-G14FailClosed 'Python runtime not found'
 }
 
 function Build-ReportArgs {
@@ -107,14 +123,14 @@ function Build-ReportArgs {
 Set-Location $RepoRoot
 
 if (-not (Test-Path -LiteralPath $PythonScript)) {
-    throw "G14 python entrypoint not found: $PythonScript"
+    Stop-G14FailClosed "G14 python entrypoint not found: $PythonScript"
 }
 
 if (-not $env:PHIGRAPH_POSTGRES_DSN) {
     $env:PHIGRAPH_POSTGRES_DSN = Read-SecretEnv -Name 'PHIGRAPH_POSTGRES_DSN'
 }
 if (-not $env:PHIGRAPH_POSTGRES_DSN) {
-    throw 'PHIGRAPH_POSTGRES_DSN is required'
+    Stop-G14FailClosed 'PHIGRAPH_POSTGRES_DSN is required'
 }
 
 $python = Resolve-Python
@@ -137,7 +153,7 @@ if ($BackupOnly) {
     } else {
         & $python @args
     }
-    if ($LASTEXITCODE -ne 0) { throw "G14 backup failed (exit $LASTEXITCODE)" }
+    Complete-G14Python 'backup'
     Write-Host 'G14 backup complete. Inspect redacted report only.' -ForegroundColor Green
     exit 0
 }
@@ -151,20 +167,20 @@ if ($VerifyManifest) {
     } else {
         & $python @args
     }
-    if ($LASTEXITCODE -ne 0) { throw "G14 manifest verification failed (exit $LASTEXITCODE)" }
+    Complete-G14Python 'manifest verification'
     Write-Host 'G14 manifest verification complete.' -ForegroundColor Green
     exit 0
 }
 
 if ($FullDrill) {
     if ($ConfirmIsolatedRestore -ne $ConfirmToken) {
-        throw "-ConfirmIsolatedRestore $ConfirmToken is required for -FullDrill"
+        Stop-G14FailClosed "-ConfirmIsolatedRestore $ConfirmToken is required for -FullDrill"
     }
     if (-not $env:PHIGRAPH_G14_RESTORE_DSN) {
         $env:PHIGRAPH_G14_RESTORE_DSN = Read-SecretEnv -Name 'PHIGRAPH_G14_RESTORE_DSN' -Prompt 'PHIGRAPH_G14_RESTORE_DSN (admin connection target, not production)'
     }
     if (-not $env:PHIGRAPH_G14_RESTORE_DSN) {
-        throw 'PHIGRAPH_G14_RESTORE_DSN is required for -FullDrill'
+        Stop-G14FailClosed 'PHIGRAPH_G14_RESTORE_DSN is required for -FullDrill'
     }
     $artifact = (Resolve-Path -LiteralPath $ArtifactDir -ErrorAction SilentlyContinue)
     if (-not $artifact) {
@@ -183,9 +199,9 @@ if ($FullDrill) {
     } else {
         & $python @args
     }
-    if ($LASTEXITCODE -ne 0) { throw "G14 full drill failed (exit $LASTEXITCODE)" }
+    Complete-G14Python 'full drill'
     Write-Host 'G14 full drill complete. Ephemeral restore database dropped.' -ForegroundColor Green
     exit 0
 }
 
-throw 'Specify -BackupOnly, -VerifyManifest, or -FullDrill'
+Stop-G14FailClosed 'Specify -BackupOnly, -VerifyManifest, or -FullDrill'

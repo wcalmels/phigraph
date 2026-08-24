@@ -1,8 +1,9 @@
 # G14 — Isolated PostgreSQL Backup/Restore Runbook
 
 Status: **local/CI implementation authorized**
-Railway live drill: **not authorized** unless explicitly approved
-Stable deployment baseline: `fc20fb8` / Railway `ea510837`
+Railway live drill: **blocked** until an authorized operator runs the Windows-safe live runner
+Railway deployed baseline: `e805f96` / Railway `f1dd97c9` (commit currently running in `phigraph-api`)
+Windows runner commit: any **clean descendant** of that baseline (the runner SHA changes with each fix; do not pin `HEAD` to the runner commit)
 
 ## Purpose
 
@@ -21,6 +22,7 @@ SHA-256 proves **integrity**, not cryptographic authenticity.
 |------|---------|
 | `scripts/g14_backup_restore.py` | Core Python entrypoint (testable) |
 | `scripts/deploy/railway_g14_backup_restore.ps1` | Operator wrapper (redacted output) |
+| `scripts/deploy/railway_g14_live_runner.ps1` | Windows-safe Railway live drill launcher (`-File` only) |
 | `docs/operations/examples/g14_backup_manifest.example.json` | Manifest shape reference (`placeholder=true`) |
 
 Required binaries: `pg_dump`, `pg_restore`, Python package `psycopg`.
@@ -133,16 +135,31 @@ For Railway production keys, prefer `railway run` env injection or `Read-Host -A
 - Production recovery requires a **new** authorized drill; do not restore over `phigraph-api` Postgres in place without explicit approval.
 - Keep manifests and dumps outside Git (`output/g14/`, `backups/`).
 
-## Railway live drill (future, not authorized)
+## Windows Railway live drill
 
-When approved:
+Use a **normal interactive PowerShell window**, not an agent, Cursor task, or nested `-Command` string. Nested `powershell -Command`, `python -c`, and `cmd /c` quoting is forbidden: it dropped DSN quotes on Windows and failed before `pg_dump`.
 
-1. Disconnect GitHub source (if autodeploy risk exists).
-2. Run backup against Railway Postgres using `railway run` env injection.
-3. Restore only to isolated non-Railway or ephemeral CI database.
-4. Attach redacted report to change record.
+Railway baseline (`ExpectedBaselineCommit`): `e805f969421fc0392632365df998d0a248fc9d97`.
+The live runner must run from a **clean** worktree whose `HEAD` **descends from** that baseline (`git merge-base --is-ancestor`). The runner's own commit is not the Railway deployment pin.
 
-Until then: **local/CI only**.
+```powershell
+cd C:\Users\wcalm\phigraph-g14-e805f96
+.\scripts\deploy\railway_g14_live_runner.ps1
+```
+
+Operator flow:
+
+1. Confirm Railway freeze (no `phigraph-api` source, no unplanned deploy).
+2. Enable the Postgres TCP Proxy **manually** in Railway only for the duration of the drill.
+3. Run `railway_g14_live_runner.ps1` in interactive PowerShell. It prompts for the **local** PostgreSQL password via `Read-Host -AsSecureString`, then re-invokes itself with:
+   `railway run --service Postgres -- powershell -NoProfile -ExecutionPolicy Bypass -File <this-script> -InsideRailwayEnvironment`
+4. Restore target is local only: `127.0.0.1:5432` ephemeral `phigraph_g14_<8hex>`.
+5. **Always remove the TCP Proxy after the drill, including on failure**: Postgres → Settings → Networking → delete `:5432` → Deploy Changes. Confirm `DATABASE_PUBLIC_URL` is gone.
+6. Do not start a second drill until the proxy is absent and health/live plus ready remain HTTP 200.
+
+The runner fail-closes without an interactive console, without `DATABASE_PUBLIC_URL` in the child, if restore host is not `localhost` / `127.0.0.1` / `::1`, if the password is empty, if source equals restore, if `pg_dump`/`pg_restore` are missing, if the worktree is dirty, or if `HEAD` does not descend from the Railway baseline.
+
+Do not pass DSNs on argv. Do not copy secrets to clipboard, transcript, or files. Until this runner is used by an authorized operator: **local/CI only**.
 
 ## Limitations
 
