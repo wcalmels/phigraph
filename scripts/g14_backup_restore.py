@@ -27,6 +27,7 @@ EXIT_VERIFY_FAIL = 4
 TOOL_VERSION = "1.0.0"
 CONFIRM_ISOLATED_RESTORE = "G14-ISOLATED-RESTORE"
 EPHEMERAL_DB_PATTERN = re.compile(r"^phigraph_g14_[a-f0-9]{8}$")
+DEFAULT_ALLOWED_RESTORE_HOSTS = frozenset({"localhost", "127.0.0.1", "::1", "postgres"})
 INTEGRITY_NOTE = (
     "SHA-256 demonstrates backup integrity only; it is not cryptographic authenticity."
 )
@@ -347,15 +348,37 @@ def load_manifest(path: Path) -> dict[str, Any]:
     return data
 
 
+def allowed_restore_hosts() -> frozenset[str]:
+    hosts = set(DEFAULT_ALLOWED_RESTORE_HOSTS)
+    extra = os.environ.get("PHIGRAPH_G14_ALLOWED_RESTORE_HOSTS", "")
+    for item in extra.split(","):
+        normalized = item.strip().lower()
+        if normalized:
+            hosts.add(normalized)
+    return frozenset(hosts)
+
+
+def expected_ephemeral_database_name(run_id: str) -> str:
+    name = f"phigraph_g14_{run_id}"
+    validate_ephemeral_database_name(name)
+    return name
+
+
+def assert_ephemeral_matches_run_id(run_id: str, ephemeral_database_name: str) -> None:
+    expected = expected_ephemeral_database_name(run_id)
+    if ephemeral_database_name != expected:
+        print("ephemeral database name must match manifest run_id", file=sys.stderr)
+        raise SystemExit(EXIT_PRECONDITION)
+
+
 def assert_restore_target_isolated(*, source_dsn: str, restore_dsn: str) -> None:
     if normalize_dsn(source_dsn) == normalize_dsn(restore_dsn):
         print("restore DSN must differ from source DSN", file=sys.stderr)
         raise SystemExit(EXIT_PRECONDITION)
 
     restore_host = (urlparse(restore_dsn).hostname or "").lower()
-    blocked_suffixes = (".railway.app", ".railway.internal", ".up.railway.app")
-    if any(restore_host.endswith(suffix) for suffix in blocked_suffixes):
-        print("restore target host appears to be production Railway infrastructure", file=sys.stderr)
+    if restore_host not in allowed_restore_hosts():
+        print("restore target host is not in the G14 allowlist", file=sys.stderr)
         raise SystemExit(EXIT_PRECONDITION)
 
     blocked_identity = os.environ.get("PHIGRAPH_G14_PRODUCTION_IDENTITY_HASH", "").strip().lower()
@@ -373,18 +396,20 @@ def validate_ephemeral_database_name(name: str) -> None:
 def create_ephemeral_database(admin_dsn: str, database_name: str) -> None:
     validate_ephemeral_database_name(database_name)
     import psycopg
+    from psycopg import sql
 
     with psycopg.connect(admin_dsn, autocommit=True) as conn:
         exists = conn.execute("SELECT 1 FROM pg_database WHERE datname = %s", (database_name,)).fetchone()
         if exists:
             print(f"ephemeral database already exists: {database_name}", file=sys.stderr)
             raise SystemExit(EXIT_PRECONDITION)
-        conn.execute(f'CREATE DATABASE "{database_name}"')
+        conn.execute(sql.SQL("CREATE DATABASE {}").format(sql.Identifier(database_name)))
 
 
 def drop_ephemeral_database(admin_dsn: str, database_name: str) -> None:
     validate_ephemeral_database_name(database_name)
     import psycopg
+    from psycopg import sql
 
     with psycopg.connect(admin_dsn, autocommit=True) as conn:
         conn.execute(
@@ -395,7 +420,7 @@ def drop_ephemeral_database(admin_dsn: str, database_name: str) -> None:
             """,
             (database_name,),
         )
-        conn.execute(f'DROP DATABASE IF EXISTS "{database_name}"')
+        conn.execute(sql.SQL("DROP DATABASE IF EXISTS {}").format(sql.Identifier(database_name)))
 
 
 def run_pg_restore(restore_dsn: str, backup_path: Path) -> None:
@@ -437,16 +462,19 @@ def verify_shadow_invariants(conn: Any) -> tuple[bool, list[str]]:
         rows = conn.execute(
             """
             SELECT payload->>'execution_state' AS execution_state,
-                   payload->>'outcome_origin' AS outcome_origin
+                   payload->>'outcome_origin' AS outcome_origin,
+                   COALESCE(payload->>'connector_invoked', 'false') AS connector_invoked
             FROM phigraph_scoped_ledger
             WHERE collection = 'gateway_decisions'
             """
         ).fetchall()
-        for execution_state, outcome_origin in rows:
+        for execution_state, outcome_origin, connector_invoked in rows:
             if execution_state not in {None, "NOT_EXECUTED"}:
                 issues.append("gateway_execution_state_not_shadow")
             if outcome_origin not in {None, "SHADOW_SIMULATION"}:
                 issues.append("gateway_outcome_origin_not_shadow")
+            if connector_invoked not in {"false", "False", "0"}:
+                issues.append("gateway_connector_invoked_not_false")
     return len(issues) == 0, issues
 
 
@@ -674,6 +702,8 @@ def run_restore(
 
     validate_tools_for_restore()
     manifest = load_manifest(manifest_path)
+    run_id = str(manifest["run_id"])
+    assert_ephemeral_matches_run_id(run_id, ephemeral_database_name)
     report: dict[str, Any] = {
         "tool_version": TOOL_VERSION,
         "git_commit": tool_git_commit(),
@@ -719,8 +749,25 @@ def run_restore(
             report["issues"].extend(post_restore.get("shadow_issues") or [])
     finally:
         if cleanup and created_database:
-            drop_ephemeral_database(admin_dsn, created_database)
-            report["cleanup"] = {"status": "DONE", "dropped_database": created_database}
+            if created_database != expected_ephemeral_database_name(run_id):
+                report["cleanup"] = {
+                    "status": "FAILED",
+                    "dropped_database": created_database,
+                    "error": "cleanup_target_mismatch",
+                }
+                report["warnings"].append("cleanup_skipped_target_mismatch")
+            else:
+                try:
+                    drop_ephemeral_database(admin_dsn, created_database)
+                    report["cleanup"] = {"status": "DONE", "dropped_database": created_database}
+                except Exception:
+                    report["cleanup"] = {
+                        "status": "FAILED",
+                        "dropped_database": created_database,
+                        "error": "cleanup_failed",
+                    }
+                    report["warnings"].append("cleanup_failed")
+                    report["issues"].append("cleanup_failed")
     return report
 
 
@@ -734,7 +781,7 @@ def run_full_drill(
 ) -> dict[str, Any]:
     backup_report = run_backup(source_dsn=source_dsn, artifact_dir=artifact_dir, run_id=run_id)
     manifest_path = Path(str(backup_report["manifest_path"]))
-    ephemeral_name = f"phigraph_g14_{backup_report['run_id']}"
+    ephemeral_name = expected_ephemeral_database_name(str(backup_report["run_id"]))
     restore_report = run_restore(
         manifest_path=manifest_path,
         source_dsn=source_dsn,

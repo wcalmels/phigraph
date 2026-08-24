@@ -1,7 +1,7 @@
 # G14 — Isolated PostgreSQL Backup/Restore Runbook
 
-Status: **local/CI implementation authorized**  
-Railway live drill: **not authorized** unless explicitly approved  
+Status: **local/CI implementation authorized**
+Railway live drill: **not authorized** unless explicitly approved
 Stable deployment baseline: `fc20fb8` / Railway `ea510837`
 
 ## Purpose
@@ -36,8 +36,8 @@ Required binaries: `pg_dump`, `pg_restore`, Python package `psycopg`.
 ## Hard guards
 
 - Source DSN and restore DSN **must differ**.
+- Restore targets must be on the **positive allowlist**: `localhost`, `127.0.0.1`, `::1`, `postgres`, plus optional `PHIGRAPH_G14_ALLOWED_RESTORE_HOSTS`.
 - Restore requires `-ConfirmIsolatedRestore G14-ISOLATED-RESTORE`.
-- Restore targets whose host matches `*.railway.app` / `*.up.railway.app` are rejected.
 - Ephemeral databases must match `phigraph_g14_<8 hex chars>`.
 - Only exact ephemeral database names may be dropped during cleanup.
 - Corrupted dump/manifest/checksum → non-zero exit (fail-closed).

@@ -8,6 +8,8 @@ from pathlib import Path
 
 import pytest
 
+from phigraph.core_v3.backends import PostgreSQLLedgerBackend
+from phigraph.core_v3.ledger import EvidenceLedger
 from phigraph.core_v3.postgres_migrations import reset_postgres_scoped_schema
 
 pytest.importorskip("psycopg")
@@ -28,6 +30,22 @@ def _load_g14():
     return module
 
 
+def _seed_shadow_gateway_artifact(postgres_dsn: str) -> None:
+    backend = PostgreSQLLedgerBackend(postgres_dsn, EvidenceLedger.COLLECTIONS)
+    ledger = EvidenceLedger(backend=backend)
+    ledger.append_scoped_once(
+        "gateway_decisions",
+        {
+            "execution_state": "NOT_EXECUTED",
+            "outcome_origin": "SHADOW_SIMULATION",
+            "connector_invoked": False,
+        },
+        canonical_key="g14-shadow-seed",
+        tenant_id="g14-tenant",
+        project_id="g14-project",
+    )
+
+
 @pytest.fixture
 def g14():
     return _load_g14()
@@ -36,6 +54,7 @@ def g14():
 @pytest.fixture
 def isolated_source(postgres_dsn):
     reset_postgres_scoped_schema(postgres_dsn)
+    _seed_shadow_gateway_artifact(postgres_dsn)
     try:
         yield postgres_dsn
     finally:
@@ -50,7 +69,7 @@ def restore_admin_dsn(postgres_dsn):
 
 def test_full_drill_passes_on_fresh_database(g14, isolated_source, restore_admin_dsn, tmp_path, monkeypatch):
     if shutil.which("pg_dump") is None or shutil.which("pg_restore") is None:
-        pytest.skip("pg_dump/pg_restore unavailable")
+        pytest.fail("pg_dump/pg_restore required for G14 postgres contract")
 
     monkeypatch.setenv("PHIGRAPH_POSTGRES_DSN", isolated_source)
     artifact_dir = tmp_path / "artifacts"
@@ -61,14 +80,25 @@ def test_full_drill_passes_on_fresh_database(g14, isolated_source, restore_admin
         confirm=g14.CONFIRM_ISOLATED_RESTORE,
         run_id="abcd1234",
     )
-    g14.finalize_report(report, exit_code=g14.resolve_exit_code(report))
+    exit_code = g14.resolve_exit_code(report)
+    g14.finalize_report(report, exit_code=exit_code)
 
+    assert exit_code == g14.EXIT_OK
     assert report["gates"]["G14a"] == "PASS"
     assert report["gates"]["G14b"] == "PASS"
     assert report["gates"]["G14c"] == "PASS"
     assert report["gates"]["G14d"] == "PASS"
     assert report["gates"]["G14e"] == "PASS"
     assert report["gates"]["G14g"] == "PASS"
+    assert report["post_restore_verification"]["g4_post_restore"]["state"] == "COMPATIBLE"
+    assert report["post_restore_verification"]["g4_post_restore"]["catalog_valid"] is True
+    assert report["post_restore_verification"]["inventory_match"] is True
+    assert report["post_restore_verification"]["shadow_invariants_ok"] is True
+    assert any(
+        row.get("collection") == "gateway_decisions"
+        for row in report["post_restore_verification"]["collection_counts"]
+    )
+    assert len(report["post_restore_verification"]["migration_versions"]) >= 2
     assert "secret" not in json.dumps(report)
     assert (artifact_dir / "g14_abcd1234.manifest.json").is_file()
     assert (artifact_dir / "g14_abcd1234.dump").is_file()
@@ -76,7 +106,7 @@ def test_full_drill_passes_on_fresh_database(g14, isolated_source, restore_admin
 
 def test_corrupt_manifest_rejected(g14, isolated_source, restore_admin_dsn, tmp_path, monkeypatch):
     if shutil.which("pg_dump") is None:
-        pytest.skip("pg_dump unavailable")
+        pytest.fail("pg_dump required for G14 postgres contract")
 
     monkeypatch.setenv("PHIGRAPH_POSTGRES_DSN", isolated_source)
     artifact_dir = tmp_path / "artifacts"

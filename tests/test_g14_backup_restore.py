@@ -7,6 +7,7 @@ import json
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
+
 import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -74,11 +75,16 @@ def test_source_and_restore_dsn_must_differ(g14, source_dsn):
     assert exc.value.code == g14.EXIT_PRECONDITION
 
 
-def test_restore_blocks_railway_host(g14, source_dsn):
-    railway_restore = "postgresql://u:p@phigraph-api-production.up.railway.app:5432/postgres"
+def test_restore_blocks_non_allowlisted_host(g14, source_dsn):
+    remote_restore = "postgresql://u:p@db.example.com:5432/postgres"
     with pytest.raises(SystemExit) as exc:
-        g14.assert_restore_target_isolated(source_dsn=source_dsn, restore_dsn=railway_restore)
+        g14.assert_restore_target_isolated(source_dsn=source_dsn, restore_dsn=remote_restore)
     assert exc.value.code == g14.EXIT_PRECONDITION
+
+
+def test_restore_allows_localhost(g14, source_dsn):
+    local_restore = "postgresql://u:p@localhost:5432/postgres"
+    g14.assert_restore_target_isolated(source_dsn=source_dsn, restore_dsn=local_restore)
 
 
 def test_restore_blocks_production_identity_hash(g14, source_dsn, restore_dsn, monkeypatch):
@@ -116,7 +122,7 @@ def test_invalid_header_rejected(g14, tmp_path):
 
 def test_manifest_checksum_mismatch_fail_closed(g14, source_dsn, tmp_path, monkeypatch):
     backup = tmp_path / "backup.dump"
-    sha = _write_backup(backup)
+    _write_backup(backup)
     manifest_path = _manifest(tmp_path, source_dsn, backup, "f" * 64)
     manifest = g14.load_manifest(manifest_path)
     monkeypatch.setattr(g14, "run_pg_restore_list", lambda _path: {"status": "VERIFIED"})
@@ -165,7 +171,7 @@ def test_restore_requires_confirm_token(g14, source_dsn, tmp_path):
 
 def test_verify_manifest_corruption_mode_passes(g14, source_dsn, tmp_path, monkeypatch):
     backup = tmp_path / "backup.dump"
-    sha = _write_backup(backup)
+    _write_backup(backup)
     manifest_path = _manifest(tmp_path, source_dsn, backup, "f" * 64)
     report = g14.run_verify_manifest(
         manifest_path=manifest_path,
