@@ -14,6 +14,12 @@ ROOT = Path(__file__).resolve().parents[1]
 RUNNER = ROOT / "scripts" / "deploy" / "railway_g14_live_runner.ps1"
 WRAPPER = ROOT / "scripts" / "deploy" / "railway_g14_backup_restore.ps1"
 PINNED_COMMIT = "e805f969421fc0392632365df998d0a248fc9d97"
+RAILWAY_PROJECT_ID = "005d1dea-1c82-413c-9aa3-49e8eaeb9709"
+RAILWAY_ENVIRONMENT = "production"
+RAILWAY_SERVICE = "Postgres"
+RUNBOOK = ROOT / "docs" / "operations" / "G14_BACKUP_RESTORE_RUNBOOK.md"
+RAILWAY_STUB_SENTINEL = "G14_RAILWAY_STUB_INVOKED"
+BINDING_REJECTED_SENTINEL = "G14_BINDING_REJECTED"
 G14_EXIT_OK = 0
 G14_EXIT_PRECONDITION = 2
 G14_EXIT_CONFLICT = 3
@@ -123,6 +129,104 @@ def _assert_no_secrets(result: subprocess.CompletedProcess[str]) -> None:
     assert "should-never-leak" not in combined
 
 
+def _runner_env_with_railway_sentinel(stub_dir: Path) -> dict[str, str]:
+    merged = os.environ.copy()
+    for key in (
+        "DATABASE_PUBLIC_URL",
+        "PHIGRAPH_POSTGRES_DSN",
+        "PHIGRAPH_G14_RESTORE_DSN",
+        "PGPASSWORD",
+        "DATABASE_URL",
+    ):
+        merged.pop(key, None)
+    stub_dir.mkdir(parents=True, exist_ok=True)
+    if os.name == "nt":
+        stub = (
+            f"@echo off\r\n"
+            f"echo {RAILWAY_STUB_SENTINEL}=1 1>&2\r\n"
+            "exit /b 99\r\n"
+        )
+        (stub_dir / "railway.cmd").write_text(stub, encoding="ascii")
+        (stub_dir / "railway.bat").write_text(stub, encoding="ascii")
+    else:
+        stub_path = stub_dir / "railway"
+        stub_path.write_text(
+            f"#!/bin/sh\necho {RAILWAY_STUB_SENTINEL}=1 >&2\nexit 99\n",
+            encoding="ascii",
+        )
+        stub_path.chmod(0o755)
+    merged["PATH"] = str(stub_dir) + os.pathsep + merged.get("PATH", "")
+    return merged
+
+
+def _assert_railway_stub_not_invoked(result: subprocess.CompletedProcess[str]) -> None:
+    assert RAILWAY_STUB_SENTINEL not in _combined(result)
+
+
+def _binding_probe_harness(
+    runner_path: Path,
+    param_name: str,
+    param_value: str,
+    sentinel_path: Path,
+) -> str:
+    runner_ps = str(runner_path).replace("'", "''")
+    sentinel_ps = str(sentinel_path).replace("'", "''")
+    value_ps = param_value.replace("'", "''")
+    return "\n".join(
+        [
+            "$ErrorActionPreference = 'Stop'",
+            "try {",
+            f"    & '{runner_ps}' -{param_name} '{value_ps}'",
+            "    exit 2",
+            "} catch [System.Management.Automation.ParameterBindingException] {",
+            f"    Set-Content -LiteralPath '{sentinel_ps}' -Value '{BINDING_REJECTED_SENTINEL}' -Encoding ascii -NoNewline",
+            "    exit 0",
+            "} catch {",
+            "    exit 3",
+            "}",
+        ]
+    )
+
+
+def _run_binding_rejection_probe(
+    tmp_path: Path,
+    param_name: str,
+    param_value: str,
+    env: dict[str, str],
+    *,
+    runner_path: Path = RUNNER,
+    shell: str | None = None,
+) -> subprocess.CompletedProcess[str]:
+    probe_dir = tmp_path / f"probe-{param_name}"
+    probe_dir.mkdir(parents=True, exist_ok=True)
+    sentinel_path = probe_dir / "binding.sentinel"
+    if sentinel_path.exists():
+        sentinel_path.unlink()
+    harness = _binding_probe_harness(runner_path, param_name, param_value, sentinel_path)
+    ps = shell or _powershell()
+    return subprocess.run(
+        [ps, "-NoProfile", "-Command", harness],
+        capture_output=True,
+        text=True,
+        check=False,
+        env=env,
+        cwd=str(ROOT),
+    )
+
+
+def _assert_binding_rejected_at_parameter_binding(
+    tmp_path: Path,
+    param_name: str,
+    result: subprocess.CompletedProcess[str],
+) -> None:
+    assert result.returncode == 0, _combined(result)
+    sentinel_path = tmp_path / f"probe-{param_name}" / "binding.sentinel"
+    assert sentinel_path.is_file()
+    assert sentinel_path.read_text(encoding="ascii") == BINDING_REJECTED_SENTINEL
+    _assert_railway_stub_not_invoked(result)
+    _assert_no_secrets(result)
+
+
 def test_runner_file_exists():
     assert RUNNER.is_file()
 
@@ -145,9 +249,14 @@ def test_powershell_parser_accepts_runner():
     assert "PARSE_OK" in result.stdout
 
 
+def _railway_child_block() -> str:
+    text = _runner_text()
+    return text[text.index("$childArgs = @(") : text.index("& railway @childArgs")]
+
+
 def test_child_uses_file_not_command():
     text = _runner_text()
-    railway_block = text[text.index("$childArgs = @(") : text.index("& railway @childArgs")]
+    railway_block = _railway_child_block()
     assert "-File" in railway_block
     assert "$PSCommandPath" in railway_block
     assert "-InsideRailwayEnvironment" in railway_block
@@ -158,7 +267,7 @@ def test_child_uses_file_not_command():
 
 def test_child_argv_has_no_dsn():
     text = _runner_text()
-    railway_block = text[text.index("$childArgs = @(") : text.index("& railway @childArgs")]
+    railway_block = _railway_child_block()
     assert "PHIGRAPH_" not in railway_block
     assert "DATABASE_PUBLIC_URL" not in railway_block
     assert "$encoded" not in railway_block
@@ -166,6 +275,89 @@ def test_child_argv_has_no_dsn():
     assert "postgresql://" not in railway_block
     assert "@childArgs" in text
     assert "& railway @childArgs" in text
+
+
+def test_child_selects_explicit_railway_target_before_double_dash():
+    text = _runner_text()
+    railway_block = _railway_child_block()
+    project_idx = railway_block.index("'--project'")
+    environment_idx = railway_block.index("'--environment'")
+    service_idx = railway_block.index("'--service'")
+    separator_idx = railway_block.index("'--'")
+    assert project_idx < environment_idx < service_idx < separator_idx
+    assert f"$script:RailwayProjectId = '{RAILWAY_PROJECT_ID}'" in text
+    assert RAILWAY_PROJECT_ID
+    assert f"$script:RailwayEnvironment = '{RAILWAY_ENVIRONMENT}'" in text
+    assert f"$script:RailwayService = '{RAILWAY_SERVICE}'" in text
+    assert "'--project', $script:RailwayProjectId" in railway_block
+    assert "'--environment', $script:RailwayEnvironment" in railway_block
+    assert "'--service', $script:RailwayService" in railway_block
+
+
+def test_runner_and_runbook_do_not_use_directory_association_workarounds():
+    runner = _runner_text()
+    runbook = RUNBOOK.read_text(encoding="utf-8")
+    gitignore = (ROOT / ".gitignore").read_text(encoding="utf-8")
+    exclude = ROOT / ".git" / "info" / "exclude"
+    exclude_text = exclude.read_text(encoding="utf-8") if exclude.is_file() else ""
+    for haystack in (runner, runbook):
+        assert "railway link" not in haystack
+        assert "railway.exe link" not in haystack
+    assert "railway link" not in gitignore
+    assert ".railway" not in gitignore
+    assert "railway link" not in exclude_text
+    assert ".railway" not in exclude_text
+    assert "OneDrive" not in runner
+
+
+def test_railway_target_is_not_overridable_via_runner_parameters(tmp_path):
+    text = _runner_text()
+    param_block = text[text.index("param(") : text.index("Set-StrictMode")]
+    for forbidden in (
+        r"\$Project\b",
+        r"\$Environment\b",
+        r"\$Service\b",
+        r"\$RailwayProjectId\b",
+        r"\$RailwayEnvironment\b",
+        r"\$RailwayService\b",
+    ):
+        assert re.search(forbidden, param_block) is None, forbidden
+    assert "$InsideRailwayEnvironment" in param_block
+    assert "$ExpectedBaselineCommit" in param_block
+    env = _runner_env_with_railway_sentinel(tmp_path / "railway-stub")
+    shell = _windows_powershell_51()
+    for param_name, param_value in (
+        ("Project", "00000000-0000-0000-0000-000000000000"),
+        ("Environment", "staging"),
+        ("Service", "phigraph-api"),
+        ("RailwayProjectId", "00000000-0000-0000-0000-000000000000"),
+    ):
+        result = _run_binding_rejection_probe(
+            tmp_path,
+            param_name,
+            param_value,
+            env,
+            shell=shell,
+        )
+        _assert_binding_rejected_at_parameter_binding(tmp_path, param_name, result)
+
+
+def test_binding_rejection_probe_fails_when_parameter_is_declared(tmp_path):
+    accepted_script = tmp_path / "accepts-project.ps1"
+    accepted_script.write_text("param([string]$Project)\n'ACCEPTED'\n", encoding="ascii")
+    env = _runner_env_with_railway_sentinel(tmp_path / "railway-stub-negative")
+    result = _run_binding_rejection_probe(
+        tmp_path / "negative",
+        "Project",
+        "00000000-0000-0000-0000-000000000000",
+        env,
+        runner_path=accepted_script,
+        shell=_windows_powershell_51(),
+    )
+    sentinel_path = tmp_path / "negative" / "probe-Project" / "binding.sentinel"
+    assert result.returncode == 2
+    assert not sentinel_path.exists()
+    _assert_railway_stub_not_invoked(result)
 
 
 def test_inner_source_comes_from_database_public_url_only():
