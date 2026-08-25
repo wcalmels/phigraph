@@ -19,6 +19,7 @@ RAILWAY_ENVIRONMENT = "production"
 RAILWAY_SERVICE = "Postgres"
 RUNBOOK = ROOT / "docs" / "operations" / "G14_BACKUP_RESTORE_RUNBOOK.md"
 RAILWAY_STUB_SENTINEL = "G14_RAILWAY_STUB_INVOKED"
+BINDING_REJECTED_SENTINEL = "G14_BINDING_REJECTED"
 G14_EXIT_OK = 0
 G14_EXIT_PRECONDITION = 2
 G14_EXIT_CONFLICT = 3
@@ -162,6 +163,70 @@ def _assert_railway_stub_not_invoked(result: subprocess.CompletedProcess[str]) -
     assert RAILWAY_STUB_SENTINEL not in _combined(result)
 
 
+def _binding_probe_harness(
+    runner_path: Path,
+    param_name: str,
+    param_value: str,
+    sentinel_path: Path,
+) -> str:
+    runner_ps = str(runner_path).replace("'", "''")
+    sentinel_ps = str(sentinel_path).replace("'", "''")
+    value_ps = param_value.replace("'", "''")
+    return "\n".join(
+        [
+            "$ErrorActionPreference = 'Stop'",
+            "try {",
+            f"    & '{runner_ps}' -{param_name} '{value_ps}'",
+            "    exit 2",
+            "} catch [System.Management.Automation.ParameterBindingException] {",
+            f"    Set-Content -LiteralPath '{sentinel_ps}' -Value '{BINDING_REJECTED_SENTINEL}' -Encoding ascii -NoNewline",
+            "    exit 0",
+            "} catch {",
+            "    exit 3",
+            "}",
+        ]
+    )
+
+
+def _run_binding_rejection_probe(
+    tmp_path: Path,
+    param_name: str,
+    param_value: str,
+    env: dict[str, str],
+    *,
+    runner_path: Path = RUNNER,
+    shell: str | None = None,
+) -> subprocess.CompletedProcess[str]:
+    probe_dir = tmp_path / f"probe-{param_name}"
+    probe_dir.mkdir(parents=True, exist_ok=True)
+    sentinel_path = probe_dir / "binding.sentinel"
+    if sentinel_path.exists():
+        sentinel_path.unlink()
+    harness = _binding_probe_harness(runner_path, param_name, param_value, sentinel_path)
+    ps = shell or _powershell()
+    return subprocess.run(
+        [ps, "-NoProfile", "-Command", harness],
+        capture_output=True,
+        text=True,
+        check=False,
+        env=env,
+        cwd=str(ROOT),
+    )
+
+
+def _assert_binding_rejected_at_parameter_binding(
+    tmp_path: Path,
+    param_name: str,
+    result: subprocess.CompletedProcess[str],
+) -> None:
+    assert result.returncode == 0, _combined(result)
+    sentinel_path = tmp_path / f"probe-{param_name}" / "binding.sentinel"
+    assert sentinel_path.is_file()
+    assert sentinel_path.read_text(encoding="ascii") == BINDING_REJECTED_SENTINEL
+    _assert_railway_stub_not_invoked(result)
+    _assert_no_secrets(result)
+
+
 def test_runner_file_exists():
     assert RUNNER.is_file()
 
@@ -260,16 +325,39 @@ def test_railway_target_is_not_overridable_via_runner_parameters(tmp_path):
     assert "$InsideRailwayEnvironment" in param_block
     assert "$ExpectedBaselineCommit" in param_block
     env = _runner_env_with_railway_sentinel(tmp_path / "railway-stub")
-    for extra in (
-        ("-Project", "00000000-0000-0000-0000-000000000000"),
-        ("-Environment", "staging"),
-        ("-Service", "phigraph-api"),
-        ("-RailwayProjectId", "00000000-0000-0000-0000-000000000000"),
+    shell = _windows_powershell_51()
+    for param_name, param_value in (
+        ("Project", "00000000-0000-0000-0000-000000000000"),
+        ("Environment", "staging"),
+        ("Service", "phigraph-api"),
+        ("RailwayProjectId", "00000000-0000-0000-0000-000000000000"),
     ):
-        result = _run_runner(*extra, env=env)
-        assert result.returncode != 0
-        _assert_railway_stub_not_invoked(result)
-        _assert_no_secrets(result)
+        result = _run_binding_rejection_probe(
+            tmp_path,
+            param_name,
+            param_value,
+            env,
+            shell=shell,
+        )
+        _assert_binding_rejected_at_parameter_binding(tmp_path, param_name, result)
+
+
+def test_binding_rejection_probe_fails_when_parameter_is_declared(tmp_path):
+    accepted_script = tmp_path / "accepts-project.ps1"
+    accepted_script.write_text("param([string]$Project)\n'ACCEPTED'\n", encoding="ascii")
+    env = _runner_env_with_railway_sentinel(tmp_path / "railway-stub-negative")
+    result = _run_binding_rejection_probe(
+        tmp_path / "negative",
+        "Project",
+        "00000000-0000-0000-0000-000000000000",
+        env,
+        runner_path=accepted_script,
+        shell=_windows_powershell_51(),
+    )
+    sentinel_path = tmp_path / "negative" / "probe-Project" / "binding.sentinel"
+    assert result.returncode == 2
+    assert not sentinel_path.exists()
+    _assert_railway_stub_not_invoked(result)
 
 
 def test_inner_source_comes_from_database_public_url_only():
