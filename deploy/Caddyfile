@@ -1,0 +1,7 @@
+{
+  email {$CADDY_ACME_EMAIL}
+}
+
+{$PHIGRAPH_DOMAIN} {
+  reverse_proxy api:8000
+}

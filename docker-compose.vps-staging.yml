@@ -1,0 +1,87 @@
+services:
+  postgres:
+    image: postgres:16
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-phigraph_staging}
+      POSTGRES_USER: ${POSTGRES_USER:-phigraph}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}
+    volumes:
+      - phigraph-postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-phigraph} -d ${POSTGRES_DB:-phigraph_staging}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+    expose:
+      - "5432"
+    networks:
+      - phigraph-backend
+
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: phigraph-api:vps-staging
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      PHIGRAPH_ENV: staging
+      PHIGRAPH_BACKEND: postgresql
+      PHIGRAPH_POSTGRES_DSN: postgresql://${POSTGRES_USER:-phigraph}:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-phigraph_staging}
+      PHIGRAPH_PORT: "8000"
+      PHIGRAPH_DATA_DIR: /app/data
+      PHIGRAPH_LOG_LEVEL: ${PHIGRAPH_LOG_LEVEL:-INFO}
+      PHIGRAPH_SHADOW_ONLY: "true"
+      PHIGRAPH_REAL_CONNECTORS_ENABLED: "false"
+      PHIGRAPH_API_KEY_PROPOSER: ${PHIGRAPH_API_KEY_PROPOSER:?set PHIGRAPH_API_KEY_PROPOSER}
+      PHIGRAPH_API_KEY_VERIFIER: ${PHIGRAPH_API_KEY_VERIFIER:?set PHIGRAPH_API_KEY_VERIFIER}
+      PHIGRAPH_API_KEY_TENANT_B: ${PHIGRAPH_API_KEY_TENANT_B:?set PHIGRAPH_API_KEY_TENANT_B}
+      PHIGRAPH_API_KEY_ADMIN: ${PHIGRAPH_API_KEY_ADMIN:?set PHIGRAPH_API_KEY_ADMIN}
+      PHIGRAPH_RECEIPT_SIGNING_KEY: ${PHIGRAPH_RECEIPT_SIGNING_KEY:?set PHIGRAPH_RECEIPT_SIGNING_KEY}
+      PHIGRAPH_PILOT_TENANT_A: ${PHIGRAPH_PILOT_TENANT_A:-pilot-b2-tenant-a}
+      PHIGRAPH_PILOT_TENANT_B: ${PHIGRAPH_PILOT_TENANT_B:-pilot-b2-tenant-b}
+      PHIGRAPH_PILOT_PROJECT: ${PHIGRAPH_PILOT_PROJECT:-pilot-b2-project}
+    expose:
+      - "8000"
+    read_only: true
+    tmpfs:
+      - /tmp
+    security_opt:
+      - no-new-privileges:true
+    networks:
+      - phigraph-edge
+      - phigraph-backend
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    depends_on:
+      - api
+    environment:
+      PHIGRAPH_DOMAIN: ${PHIGRAPH_DOMAIN:?set PHIGRAPH_DOMAIN}
+      CADDY_ACME_EMAIL: ${CADDY_ACME_EMAIL:?set CADDY_ACME_EMAIL}
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    networks:
+      - phigraph-edge
+
+volumes:
+  phigraph-postgres-data:
+  caddy-data:
+  caddy-config:
+
+networks:
+  phigraph-edge:
+    driver: bridge
+  phigraph-backend:
+    driver: bridge
+    internal: true
