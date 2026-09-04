@@ -1,0 +1,70 @@
+{
+  "name": "vps-private-staging-v0.2",
+  "expected_mode": "SHADOW_ONLY",
+  "real_connectors_enabled": false,
+  "rollback_image": "phigraph-api:vps-staging-last-known-good",
+  "rollback_tag": "",
+  "preserve_postgres_volume": true,
+  "post_rollback_smoke_required": true,
+  "post_rollback_g4_required": true,
+  "expected_g4_state": "COMPATIBLE",
+  "allow_real_connectors": false,
+  "stages": [
+    {
+      "name": "preflight",
+      "required_env": [
+        "PHIGRAPH_DOMAIN",
+        "PHIGRAPH_API_KEY_PROPOSER",
+        "PHIGRAPH_API_KEY_VERIFIER",
+        "PHIGRAPH_API_KEY_ADMIN",
+        "PHIGRAPH_RECEIPT_SIGNING_KEY"
+      ],
+      "must_be_true": [
+        "PHIGRAPH_SHADOW_ONLY",
+        "PHIGRAPH_REAL_CONNECTORS_ENABLED"
+      ],
+      "runtime": "static_validation_only"
+    },
+    {
+      "name": "migration_runner",
+      "entrypoint": "scripts/deploy/bootstrap_postgres_migrations.py",
+      "requires": [
+        "PHIGRAPH_POSTGRES_DSN"
+      ],
+      "mode": "single_shot",
+      "allow_destructive_actions": false
+    },
+    {
+      "name": "g4_schema_governance",
+      "gate": "G4",
+      "must_be": "COMPATIBLE",
+      "catalog_valid": true
+    },
+    {
+      "name": "smoke_test",
+      "entrypoint": "scripts/deploy/vps_smoke_test.py",
+      "mode": "shadow_only",
+      "expect": [
+        "GET /health/live",
+        "GET /ready",
+        "GET /v4/grdi/health"
+      ]
+    },
+    {
+      "name": "g14_backup_restore_adapter",
+      "entrypoint": "scripts/deploy/vps_g14_adapter.py",
+      "mode": "dry_run",
+      "requires_explicit_authorization": true
+    },
+    {
+      "name": "rollback_verification",
+      "entrypoint": "scripts/deploy/vps_rollback_check.py",
+      "mode": "shadow_only",
+      "evidence_required": [
+        "last_known_good_baseline",
+        "shadow_only_guard",
+        "connector_disabled_guard"
+      ]
+    }
+  ]
+}

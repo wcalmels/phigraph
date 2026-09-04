@@ -19,6 +19,25 @@ services:
     networks:
       - phigraph-backend
 
+  migrate:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: phigraph-api:vps-staging
+    restart: "no"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      PHIGRAPH_ENV: staging
+      PHIGRAPH_BACKEND: postgresql
+      PHIGRAPH_POSTGRES_DSN: postgresql://${POSTGRES_USER:-phigraph}:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-phigraph_staging}
+      PHIGRAPH_SHADOW_ONLY: "true"
+      PHIGRAPH_REAL_CONNECTORS_ENABLED: "false"
+    command: ["python", "/app/scripts/deploy/bootstrap_postgres_migrations.py"]
+    networks:
+      - phigraph-backend
+
   api:
     build:
       context: .
