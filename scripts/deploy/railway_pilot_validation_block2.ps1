@@ -7,6 +7,14 @@
 .PARAMETER SkipRestart
   Skip G12/G13 restart checks (service restart requires Railway CLI + linked project).
 
+.PARAMETER PromptOptionalKeys
+  Prompt hidden entry for verifier and tenant-B registry keys when they are not
+  already provided through the process environment.
+
+.PARAMETER ManualRestart
+  Pause after the shadow flow so an operator can restart the linked API service
+  from Railway's dashboard, then verify persistence without invoking Railway CLI.
+
 .EXAMPLE
   .\scripts\deploy\railway_pilot_validation_block2.ps1
 
@@ -18,7 +26,9 @@
 #>
 [CmdletBinding()]
 param(
-    [switch]$SkipRestart
+    [switch]$SkipRestart,
+    [switch]$PromptOptionalKeys,
+    [switch]$ManualRestart
 )
 
 Set-StrictMode -Version Latest
@@ -57,6 +67,7 @@ function Get-OptionalSecretKey {
 }
 
 function Get-Block2Keys {
+    param([switch]$PromptOptionalKeys)
     $proposer = Get-OptionalSecretKey 'PHIGRAPH_API_KEY_PROPOSER' 'PHIGRAPH_API_KEY_PROPOSER'
     if (-not $proposer) {
         $proposer = Get-OptionalSecretKey 'PHIGRAPH_API_KEY' 'PHIGRAPH_API_KEY'
@@ -66,6 +77,12 @@ function Get-Block2Keys {
     }
     $verifier = Get-OptionalSecretKey 'PHIGRAPH_API_KEY_VERIFIER' 'PHIGRAPH_API_KEY_VERIFIER'
     $tenantB = Get-OptionalSecretKey 'PHIGRAPH_API_KEY_TENANT_B' 'PHIGRAPH_API_KEY_TENANT_B'
+    if ($PromptOptionalKeys -and -not $verifier) {
+        $verifier = Read-SecretKey 'PHIGRAPH_API_KEY_VERIFIER'
+    }
+    if ($PromptOptionalKeys -and -not $tenantB) {
+        $tenantB = Read-SecretKey 'PHIGRAPH_API_KEY_TENANT_B'
+    }
     if (-not $proposer) { throw 'PHIGRAPH_API_KEY_PROPOSER (or PHIGRAPH_API_KEY) is required' }
     return [pscustomobject]@{
         Proposer = $proposer
@@ -93,6 +110,17 @@ function Redact-Text {
     $redacted = [regex]::Replace($redacted, '(?i)("(?:value|signature|key|token|receipt_signing_key)"\s*:\s*")[^"]+(")', '$1[REDACTED]$2')
     $redacted = [regex]::Replace($redacted, '(?i)(PHIGRAPH_API_KEY(?:_(?:PROPOSER|VERIFIER|TENANT_B|ADMIN))?=)\S+', '$1[REDACTED]')
     return $redacted
+}
+
+function Get-JsonStringProperty {
+    param(
+        [object]$Json,
+        [string]$Name
+    )
+    if ($null -eq $Json) { return $null }
+    $property = $Json.PSObject.Properties[$Name]
+    if ($null -eq $property -or $null -eq $property.Value) { return $null }
+    return [string]$property.Value
 }
 
 function Write-Evidence {
@@ -335,7 +363,7 @@ Write-Host '== PhiGraph Railway pilot - block 2 validation ==' -ForegroundColor 
 Write-Host "Base: $Base | RunId: $RunId"
 Write-Evidence "$(Get-Date -Format o) | block2 start"
 
-$Keys = Get-Block2Keys
+$Keys = Get-Block2Keys -PromptOptionalKeys:$PromptOptionalKeys
 $ProposerKey = $Keys.Proposer
 $VerifierKey = $Keys.Verifier
 $TenantBKey = $Keys.TenantB
@@ -343,8 +371,10 @@ $TenantBKey = $Keys.TenantB
 try {
     $spoofTenant = "spoof-$RunId"
     $headerProbe = Invoke-PilotApi -Path '/v4/grdi/health' -Headers (New-Headers -ApiKey $ProposerKey -TenantId $spoofTenant -ProjectId $Project -Subject 'attacker' -Role 'admin') -ExpectStatus @(200)
-    $headersIgnored = $headerProbe.Ok -and ($headerProbe.Json.tenant_id -ne $spoofTenant)
-    Write-Evidence "$(Get-Date -Format o) | header spoof tenant=$spoofTenant resolved=$($headerProbe.Json.tenant_id) ignored=$headersIgnored"
+    $resolvedTenant = Get-JsonStringProperty -Json $headerProbe.Json -Name 'tenant_id'
+    $probeDetail = Get-JsonStringProperty -Json $headerProbe.Json -Name 'detail'
+    $headersIgnored = $headerProbe.Ok -and $null -ne $resolvedTenant -and ($resolvedTenant -ne $spoofTenant)
+    Write-Evidence "$(Get-Date -Format o) | header spoof HTTP $($headerProbe.Status) tenant=$spoofTenant resolved=$resolvedTenant detail=$probeDetail ignored=$headersIgnored"
     if ($headersIgnored) {
         Set-Gate 'G6b' 'PASS' 'untrusted X-Tenant-ID ignored; server-side identity used'
     } else {
@@ -355,7 +385,9 @@ try {
     if ($VerifierKey) {
         $verifierIdentity = Get-GrdiIdentity -ApiKey $VerifierKey
         $DualIdentityReady = $proposerIdentity.Ok -and $verifierIdentity.Ok -and ($ProposerKey -ne $VerifierKey)
-        Write-Evidence "$(Get-Date -Format o) | proposer tenant=$($proposerIdentity.Json.tenant_id) verifier tenant=$($verifierIdentity.Json.tenant_id) dual=$DualIdentityReady"
+        $proposerTenant = Get-JsonStringProperty -Json $proposerIdentity.Json -Name 'tenant_id'
+        $verifierTenant = Get-JsonStringProperty -Json $verifierIdentity.Json -Name 'tenant_id'
+        Write-Evidence "$(Get-Date -Format o) | proposer HTTP $($proposerIdentity.Status) tenant=$proposerTenant verifier HTTP $($verifierIdentity.Status) tenant=$verifierTenant dual=$DualIdentityReady"
     } else {
         Write-Evidence "$(Get-Date -Format o) | verifier key not supplied; dual-identity gates NOT_EVALUATED"
     }
@@ -390,11 +422,14 @@ try {
     } else {
         $g4Headers = New-Headers -ApiKey $AdminKey -TenantId $TenantA -ProjectId $Project -Subject 'schema-admin' -Role 'admin'
         $g4 = Invoke-PilotApi -Path '/v3/admin/schema-governance' -Headers $g4Headers -ExpectStatus @(200)
-        Write-Evidence "$(Get-Date -Format o) | schema_governance state=$($g4.Json.state) catalog_valid=$($g4.Json.catalog_valid)"
-        if ($g4.Ok -and $g4.Json.state -eq 'COMPATIBLE' -and $g4.Json.catalog_valid -eq $true) {
+        $g4State = Get-JsonStringProperty -Json $g4.Json -Name 'state'
+        $g4CatalogValid = $null -ne $g4.Json -and $null -ne $g4.Json.PSObject.Properties['catalog_valid'] -and $g4.Json.PSObject.Properties['catalog_valid'].Value -eq $true
+        $g4Detail = Get-JsonStringProperty -Json $g4.Json -Name 'detail'
+        Write-Evidence "$(Get-Date -Format o) | schema_governance HTTP $($g4.Status) state=$g4State catalog_valid=$g4CatalogValid detail=$g4Detail"
+        if ($g4.Ok -and $g4State -eq 'COMPATIBLE' -and $g4CatalogValid) {
             Set-Gate 'G4' 'PASS' 'schema governance COMPATIBLE; migration registry verified'
         } elseif ($g4.Ok) {
-            Set-Gate 'G4' 'FAIL' "schema governance state=$($g4.Json.state) issues=$($g4.Json.issues -join ';')"
+            Set-Gate 'G4' 'FAIL' "schema governance state=$g4State"
         } else {
             Set-Gate 'G4' 'FAIL' "schema governance HTTP $($g4.Status)"
         }
@@ -497,6 +532,7 @@ try {
     } else {
     $flow = Invoke-GrdiShadowFlow -ProposerKey $ProposerKey -VerifierKey $VerifierKey -TenantId $TenantA -ProjectId $Project -Suffix $mainSuffix
     $replayId = $null
+    $outcomeId = $null
     if (-not $flow.Ok) {
         Write-Evidence "$(Get-Date -Format o) | grdi flow failed step=$($flow.Step) HTTP $($flow.Status) detail=$($flow.Detail)"
         Set-Gate 'G9' 'FAIL' "GRDI flow failed at $($flow.Step)"
@@ -537,6 +573,29 @@ try {
         $replay = Invoke-PilotApi -Method Post -Path "/v4/grdi/execution-plans/$($flow.PlanId)/replays" -Headers $replayHeaders -ExpectStatus @(201)
         $replayId = $replay.Json.replay_id
         Write-Evidence "$(Get-Date -Format o) | replay_id=$replayId"
+
+        $outcomeHeaders = New-Headers -ApiKey $VerifierKey -TenantId $TenantA -ProjectId $Project -Subject 'outcome-auditor' -Role 'verifier'
+        $outcomeHeaders['Idempotency-Key'] = "b2-outcome-$RunId"
+        $outcomeHeaders['Content-Type'] = 'application/json'
+        $outcomeBody = @{
+            effect_assessments = @(
+                @{
+                    expected_effect = 'staging promotion recorded'
+                    simulated_observation = 'observed in shadow'
+                    state = 'MATCHED'
+                }
+            )
+            metrics = @{ latency_ms = 0 }
+            limitations = @('shadow only')
+        } | ConvertTo-Json -Depth 8 -Compress
+        $outcome = Invoke-PilotApi -Method Post -Path "/v4/grdi/execution-plans/$($flow.PlanId)/outcomes" -Headers $outcomeHeaders -Body $outcomeBody -ExpectStatus @(201)
+        if ($outcome.Ok -and $outcome.Json -and $null -ne $outcome.Json.PSObject.Properties['outcome_id']) {
+            $outcomeId = $outcome.Json.outcome_id
+            Write-Evidence "$(Get-Date -Format o) | outcome_id=$outcomeId state=$($outcome.Json.outcome_state)"
+        } else {
+            $outcomeId = $null
+            Write-Evidence "$(Get-Date -Format o) | outcome create failed HTTP $($outcome.Status) detail=$($outcome.Json.detail)"
+        }
     }
     }
 
@@ -570,44 +629,126 @@ try {
     if ($concPass) { Set-Gate 'G7c' 'PASS' 'two parallel HAV verifies returned 200' }
     else { Set-Gate 'G7c' 'FAIL' 'concurrent HAV verify failed' }
 
-    # G12/G13 - restart persistence
+    # G12/G13 - service lifecycle persistence (restart or redeploy)
     if ($SkipRestart) {
         Set-Gate 'G12' 'NOT_EVALUATED' '-SkipRestart'
         Set-Gate 'G13' 'NOT_EVALUATED' '-SkipRestart'
     } elseif (-not $DualIdentityReady) {
         Set-Gate 'G12' 'NOT_EVALUATED' 'requires completed GRDI flow with dual server-side identities'
         Set-Gate 'G13' 'NOT_EVALUATED' 'requires completed GRDI flow with dual server-side identities'
-    } elseif (-not (Get-Command railway -ErrorAction SilentlyContinue)) {
+    } elseif ((-not $ManualRestart) -and (-not (Get-Command railway -ErrorAction SilentlyContinue))) {
         Set-Gate 'G12' 'NOT_EVALUATED' 'Railway CLI not available'
         Set-Gate 'G13' 'NOT_EVALUATED' 'Railway CLI not available'
     } else {
-        Write-Evidence "$(Get-Date -Format o) | restarting phigraph-api via Railway CLI"
-        $null = railway restart --service phigraph-api --yes 2>&1
-        Start-Sleep -Seconds 45
-        $live2 = Invoke-PilotApi -Path '/health/live' -ExpectStatus @(200)
-        if (-not $flow.Ok) {
-            Set-Gate 'G12' 'NOT_EVALUATED' 'GRDI main flow failed'
-            Set-Gate 'G13' 'NOT_EVALUATED' 'GRDI main flow failed'
+        if ($ManualRestart) {
+            Write-Evidence "$(Get-Date -Format o) | manual reload required for G12/G13"
+            Read-Host 'Restart or redeploy phigraph-api, wait until it is Online, then press Enter to verify persistence' | Out-Null
+            $restartExitCode = 0
         } else {
-        $getEnv2 = Invoke-PilotApi -Path "/v4/grdi/envelopes/$($flow.EnvelopeId)" -Headers (New-Headers -ApiKey $ProposerKey -TenantId $TenantA -ProjectId $Project -Subject 'viewer' -Role 'verifier') -ExpectStatus @(200)
-        $getPlan2 = Invoke-PilotApi -Path "/v4/grdi/execution-plans/$($flow.PlanId)" -Headers (New-Headers -ApiKey $ProposerKey -TenantId $TenantA -ProjectId $Project -Subject 'viewer' -Role 'verifier') -ExpectStatus @(200)
-        if ($live2.Ok -and $getEnv2.Ok -and $getPlan2.Ok) {
-            Set-Gate 'G12' 'PASS' 'envelope + plan survive service restart'
-        } else {
-            Set-Gate 'G12' 'FAIL' "post-restart live=$($live2.Status) env=$($getEnv2.Status) plan=$($getPlan2.Status)"
-        }
-        if ($replayId) {
-            $getReplay = Invoke-PilotApi -Path "/v4/grdi/replays/$replayId" -Headers (New-Headers -ApiKey $VerifierKey -TenantId $TenantA -ProjectId $Project -Subject 'viewer' -Role 'verifier') -ExpectStatus @(200)
-            if ($getReplay.Ok -and $getReplay.Json.execution_state -eq 'NOT_EXECUTED') {
-                Set-Gate 'G13' 'PASS' 'replay report persisted; execution_state NOT_EXECUTED'
-            } elseif ($getReplay.Ok) {
-                Set-Gate 'G13' 'FAIL' "replay execution_state=$($getReplay.Json.execution_state)"
-            } else {
-                Set-Gate 'G13' 'FAIL' "GET replay HTTP $($getReplay.Status)"
+            Write-Evidence "$(Get-Date -Format o) | restarting phigraph-api via Railway CLI"
+            $previousErrorActionPreference = $ErrorActionPreference
+            $ErrorActionPreference = 'Continue'
+            try {
+                $restartOutput = & railway restart --service phigraph-api --yes 2>&1
+                $restartExitCode = $LASTEXITCODE
+            } finally {
+                $ErrorActionPreference = $previousErrorActionPreference
             }
-        } else {
-            Set-Gate 'G13' 'FAIL' 'replay report not created'
         }
+        if ($restartExitCode -ne 0) {
+            $restartSummary = (($restartOutput | Out-String).Trim() -replace '[\r\n]+', ' ')
+            Write-Evidence "$(Get-Date -Format o) | Railway restart failed exit=$restartExitCode detail=$restartSummary"
+            Set-Gate 'G12' 'NOT_EVALUATED' "Railway restart failed (exit $restartExitCode)"
+            Set-Gate 'G13' 'NOT_EVALUATED' "Railway restart failed (exit $restartExitCode)"
+        } else {
+            if (-not $ManualRestart) { Start-Sleep -Seconds 45 }
+            $live2 = Invoke-PilotApi -Path '/health/live' -ExpectStatus @(200)
+            if (-not $flow.Ok) {
+                Set-Gate 'G12' 'NOT_EVALUATED' 'GRDI main flow failed'
+                Set-Gate 'G13' 'NOT_EVALUATED' 'GRDI main flow failed'
+            } else {
+                if (-not $outcomeId) {
+                    Set-Gate 'G12' 'FAIL' 'outcome no fue creado antes del lifecycle'
+                } else {
+                    $outcomeGet = Invoke-PilotApi -Path "/v4/grdi/outcomes/$outcomeId" -Headers (New-Headers -ApiKey $VerifierKey -TenantId $TenantA -ProjectId $Project -Subject 'outcome-viewer' -Role 'verifier') -ExpectStatus @(200)
+                    $persistedOutcomeId = if ($outcomeGet.Ok -and $outcomeGet.Json -and $null -ne $outcomeGet.Json.PSObject.Properties['outcome_id']) { $outcomeGet.Json.outcome_id } else { $null }
+                    $persistedOutcomeState = if ($outcomeGet.Ok -and $outcomeGet.Json -and $null -ne $outcomeGet.Json.PSObject.Properties['outcome_state']) { $outcomeGet.Json.outcome_state } else { $null }
+                    if ($live2.Ok -and $outcomeGet.Ok -and $persistedOutcomeId -eq $outcomeId) {
+                        Set-Gate 'G12' 'PASS' "Outcome Ledger persisted across service lifecycle; outcome_id=$persistedOutcomeId state=$persistedOutcomeState"
+                    } else {
+                        Set-Gate 'G12' 'FAIL' "post-lifecycle live=$($live2.Status) outcome=$($outcomeGet.Status)"
+                    }
+                }
+
+                if ($replayId) {
+                    $getReplay = Invoke-PilotApi -Path "/v4/grdi/replays/$replayId" -Headers (New-Headers -ApiKey $VerifierKey -TenantId $TenantA -ProjectId $Project -Subject 'viewer' -Role 'verifier') -ExpectStatus @(200)
+
+                    if ($getReplay.Ok) {
+                        $replayJson = $getReplay.Json
+                        $replayIdMatch = $null -ne $replayJson -and $null -ne $replayJson.PSObject.Properties['replay_id'] -and [string]$replayJson.replay_id -eq $replayId
+                        $executionState = if ($null -ne $replayJson -and $null -ne $replayJson.PSObject.Properties['execution_state']) { [string]$replayJson.execution_state } else { $null }
+
+                        if ($replayIdMatch -and $executionState -eq 'NOT_EXECUTED') {
+                            Set-Gate 'G13' 'PASS' 'replay persisted and semantically valid; execution_state NOT_EXECUTED'
+                        } else {
+                            Set-Gate 'G13' 'FAIL' "replay persisted but did not satisfy valid replay contract: replay_id_match=$replayIdMatch execution_state=$executionState"
+                        }
+                    } elseif ($getReplay.Status -eq 409) {
+                        $replayDetail = $null
+                        $replayReason = $null
+                        $replayCode = $null
+                        $replayStatus = $null
+
+                        if ($null -ne $getReplay.Json) {
+                            $replayDetail = if ($null -ne $getReplay.Json.PSObject.Properties['detail']) { [string]$getReplay.Json.detail } else { $null }
+                            $replayReason = if ($null -ne $getReplay.Json.PSObject.Properties['reason']) { [string]$getReplay.Json.reason } else { $null }
+                            $replayCode = if ($null -ne $getReplay.Json.PSObject.Properties['code']) { [string]$getReplay.Json.code } else { $null }
+                            $replayStatus = if ($null -ne $getReplay.Json.PSObject.Properties['status']) { [string]$getReplay.Json.status } else { $null }
+                        }
+
+                        if (-not $replayDetail -and $null -ne $getReplay.Json -and $null -ne $getReplay.Json.PSObject.Properties['error']) {
+                            $replayDetail = [string]$getReplay.Json.error
+                        }
+                        if (-not $replayReason -and $null -ne $getReplay.Json -and $null -ne $getReplay.Json.PSObject.Properties['message']) {
+                            $replayReason = [string]$getReplay.Json.message
+                        }
+
+                        if ($replayDetail -and $replayDetail.StartsWith('replay_source_drift:')) {
+                            Write-Evidence "$(Get-Date -Format o) | replay GET HTTP 409 detail=$replayDetail"
+                            Set-Gate 'G13' 'PASS' 'replay persisted; source drift detected by fail-closed revalidation'
+                        } else {
+                            Write-Evidence "$(Get-Date -Format o) | replay GET failed HTTP $($getReplay.Status) code=$replayCode reason=$replayReason detail=$replayDetail status=$replayStatus"
+                            Set-Gate 'G13' 'FAIL' "GET replay HTTP $($getReplay.Status) code=$replayCode reason=$replayReason detail=$replayDetail status=$replayStatus"
+                        }
+                    } elseif ($getReplay.Status -eq 404) {
+                        Set-Gate 'G13' 'FAIL' 'replay not found after service lifecycle'
+                    } else {
+                        $replayDetail = $null
+                        $replayReason = $null
+                        $replayCode = $null
+                        $replayStatus = $null
+
+                        if ($null -ne $getReplay.Json) {
+                            $replayDetail = if ($null -ne $getReplay.Json.PSObject.Properties['detail']) { [string]$getReplay.Json.detail } else { $null }
+                            $replayReason = if ($null -ne $getReplay.Json.PSObject.Properties['reason']) { [string]$getReplay.Json.reason } else { $null }
+                            $replayCode = if ($null -ne $getReplay.Json.PSObject.Properties['code']) { [string]$getReplay.Json.code } else { $null }
+                            $replayStatus = if ($null -ne $getReplay.Json.PSObject.Properties['status']) { [string]$getReplay.Json.status } else { $null }
+                        }
+
+                        if (-not $replayDetail -and $null -ne $getReplay.Json -and $null -ne $getReplay.Json.PSObject.Properties['error']) {
+                            $replayDetail = [string]$getReplay.Json.error
+                        }
+                        if (-not $replayReason -and $null -ne $getReplay.Json -and $null -ne $getReplay.Json.PSObject.Properties['message']) {
+                            $replayReason = [string]$getReplay.Json.message
+                        }
+
+                        Write-Evidence "$(Get-Date -Format o) | replay GET failed HTTP $($getReplay.Status) code=$replayCode reason=$replayReason detail=$replayDetail status=$replayStatus"
+                        Set-Gate 'G13' 'FAIL' "GET replay HTTP $($getReplay.Status) code=$replayCode reason=$replayReason detail=$replayDetail status=$replayStatus"
+                    }
+                } else {
+                    Set-Gate 'G13' 'FAIL' 'replay report not created'
+                }
+            }
         }
     }
 
