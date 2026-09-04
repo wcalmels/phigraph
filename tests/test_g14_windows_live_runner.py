@@ -205,7 +205,7 @@ def _run_binding_rejection_probe(
     harness = _binding_probe_harness(runner_path, param_name, param_value, sentinel_path)
     ps = shell or _powershell()
     return subprocess.run(
-        [ps, "-NoProfile", "-Command", harness],
+        [ps, "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", harness],
         capture_output=True,
         text=True,
         check=False,
