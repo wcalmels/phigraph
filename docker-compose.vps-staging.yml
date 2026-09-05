@@ -51,11 +51,13 @@ services:
       PHIGRAPH_ENV: staging
       PHIGRAPH_BACKEND: postgresql
       PHIGRAPH_POSTGRES_DSN: postgresql://${POSTGRES_USER:-phigraph}:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-phigraph_staging}
+      PHIGRAPH_DATABASE_URL: sqlite:////app/data/phigraph.db
       PHIGRAPH_PORT: "8000"
       PHIGRAPH_DATA_DIR: /app/data
       PHIGRAPH_LOG_LEVEL: ${PHIGRAPH_LOG_LEVEL:-INFO}
       PHIGRAPH_SHADOW_ONLY: "true"
       PHIGRAPH_REAL_CONNECTORS_ENABLED: "false"
+      PHIGRAPH_API_KEY: ${PHIGRAPH_API_KEY:?set PHIGRAPH_API_KEY}
       PHIGRAPH_API_KEY_PROPOSER: ${PHIGRAPH_API_KEY_PROPOSER:?set PHIGRAPH_API_KEY_PROPOSER}
       PHIGRAPH_API_KEY_VERIFIER: ${PHIGRAPH_API_KEY_VERIFIER:?set PHIGRAPH_API_KEY_VERIFIER}
       PHIGRAPH_API_KEY_TENANT_B: ${PHIGRAPH_API_KEY_TENANT_B:?set PHIGRAPH_API_KEY_TENANT_B}
@@ -66,6 +68,8 @@ services:
       PHIGRAPH_PILOT_PROJECT: ${PHIGRAPH_PILOT_PROJECT:-pilot-b2-project}
     expose:
       - "8000"
+    volumes:
+      - phigraph-api-data:/app/data
     read_only: true
     tmpfs:
       - /tmp
@@ -95,6 +99,7 @@ services:
 
 volumes:
   phigraph-postgres-data:
+  phigraph-api-data:
   caddy-data:
   caddy-config:
 

@@ -48,6 +48,7 @@ def test_compose_network_topology_is_split_and_private() -> None:
 def test_compose_uses_required_fail_fast_variables() -> None:
     text = COMPOSE_PATH.read_text(encoding="utf-8")
     for var in (
+        "PHIGRAPH_API_KEY",
         "PHIGRAPH_API_KEY_PROPOSER",
         "PHIGRAPH_API_KEY_VERIFIER",
         "PHIGRAPH_API_KEY_TENANT_B",
@@ -70,6 +71,13 @@ def test_compose_has_postgres_persistence_and_hardening_flags() -> None:
     assert "restart: unless-stopped" in text
 
 
+def test_compose_has_both_data_volumes_declared() -> None:
+    text = COMPOSE_PATH.read_text(encoding="utf-8")
+    assert "phigraph-postgres-data" in text
+    assert "phigraph-api-data" in text
+    assert "/app/data" in text
+
+
 def test_compose_has_no_literal_secret_examples() -> None:
     text = COMPOSE_PATH.read_text(encoding="utf-8")
     forbidden = (
@@ -89,6 +97,7 @@ def test_vps_env_example_documents_placeholders_only() -> None:
     assert "POSTGRES_DB" in text
     assert "POSTGRES_USER" in text
     assert "POSTGRES_PASSWORD" in text
+    assert "PHIGRAPH_API_KEY" in text
     assert "PHIGRAPH_API_KEY_PROPOSER" in text
     assert "PHIGRAPH_API_KEY_VERIFIER" in text
     assert "PHIGRAPH_API_KEY_TENANT_B" in text
