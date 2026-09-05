@@ -1,4 +1,4 @@
-﻿"""
+"""
 tests/test_vps_v03_contract.py
 
 Contract tests for VPS Private Staging v0.3 local Docker integration drill.

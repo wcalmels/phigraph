@@ -1,4 +1,4 @@
-﻿# VPS Private Staging v0.3 â€” Local Docker Integration Drill
+# VPS Private Staging v0.3 â€” Local Docker Integration Drill
 
 ## Scope
 
