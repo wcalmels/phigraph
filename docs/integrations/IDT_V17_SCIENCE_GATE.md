@@ -1,0 +1,3 @@
+# IDT v1.7 — proposed scientific claim gates
+
+Add shadow-only IDT candidate claims: `IDT-6D-FLAT-S2` conditional algebraic background; `IDT-ALPHA` open, blocked by gauge normalization / threshold matching; `IDT-INFO` open, lacking a physical observable; `IDT-CONS` open, lacking operational evidence. Do not mark anything verified based solely on internal calculation. Future integration must use the actual `phigraph.protocol` `Claim` and `Evidence` types, preserve issuer/verifier separation, enforce tenant/project scoping, and record dependency edges. Current v1.7 local environment has **not imported installed native PhiGraph**; no endorsement or production readiness is claimed.
